@@ -1,0 +1,28 @@
+public struct SiestaError {
+    kind: string
+    line: int64
+    col: int64
+    message: string
+    code: int32
+}
+
+public fun siesta_error(
+    message: string,
+    line: int64 = 1,
+    col: int64 = 1,
+    code: int32 = 100,
+    kind: string = "syntax"
+) -> SiestaError {
+    return SiestaError {
+        kind: kind,
+        line: line,
+        col: col,
+        message: message,
+        code: code
+    }
+}
+
+public fun format_siesta_error(e: SiestaError) -> string {
+    set k: string = if e.kind.len() > 0 { e.kind } else { "syntax" }
+    return "siesta spes ${k} error[${e.line}|${e.col}]: ${e.message}"
+}

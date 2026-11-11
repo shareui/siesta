@@ -1,0 +1,1049 @@
+load core.utils: cast
+load std.strings: upper, contains
+load .ast: SpesModule, ThemeDef, ComponentDef, DialogDef, ScreenDef, WidgetNode, PropDef, StateFieldDef, ShortcutDef
+load .locales: LocaleCatalog
+
+public class SpesCodegen {
+    default_locale: string
+    dialog_row: int32
+
+    public fun init(default_locale: string = "en") {
+        rewrite this.default_locale = default_locale
+        rewrite this.dialog_row = 1
+    }
+
+    #[region::capacity(2097152)]
+    public fun generate_module(m: SpesModule, catalog: LocaleCatalog?) -> string {
+        set code: string = "load siesta: Cell, init_cell, TerminalBuffer, LayoutContext, Screen, Dialog, SiestaApp, detect_is_dark_mode\n"
+        rewrite code = code + "load siesta: Rect, init_rect, Constraint, solve_constraints, layout_split_horizontal, layout_split_vertical, layout_row, layout_col, LayoutNode, init_layout_node\n"
+        rewrite code = code + "load siesta: BlockWidget, BORDER_PLAIN, BORDER_ROUNDED, BORDER_DOUBLE, BORDER_THICK, BORDER_ASCII, BORDER_NONE, ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT\n"
+        rewrite code = code + "load siesta: ParagraphWidget, WRAP_NONE, WRAP_CHAR, WRAP_WORD, ScrollbarWidget, GaugeWidget, LineGaugeWidget, SparklineWidget, BarChartWidget, TreeWidget, TreeItem, init_tree_item\n"
+        rewrite code = code + "load siesta: ProgressWidget, TableWidget, TableColumn, TableRow, TextAreaWidget, ListWidget, RadioGroupWidget, CheckboxWidget, ButtonWidget, Transition, Pulse, Slide\n"
+        rewrite code = code + "load std.itermtool.key: KeyEvent, KEY_CHAR, KEY_ENTER, KEY_BACKSPACE, KEY_ESC, KEY_TAB, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_HOME, KEY_END, KEY_DELETE, KEY_SPACE, KEY_F1\n"
+        rewrite code = code + "load std.itermtool.mouse: MouseEvent\n\n"
+        rewrite code = code + this.generate_translations(catalog) + "\n\n"
+        for i in 0..m.themes.len() {
+            rewrite code = code + this.generate_theme(m.themes[i]) + "\n\n"
+        }
+        for i in 0..m.components.len() {
+            rewrite code = code + this.generate_component(m.components[i]) + "\n\n"
+        }
+        for i in 0..m.dialogs.len() {
+            rewrite code = code + this.generate_dialog(m.dialogs[i]) + "\n\n"
+        }
+        set theme_fg = "\"#cdd6f4\""
+        set theme_bg = "\"#1e1e2e\""
+        for i in 0..m.themes.len() {
+            set t = m.themes[i]
+            for j in 0..t.tokens.len() {
+                set tok = t.tokens[j]
+                if tok.key == "fg" {
+                    set v = tok.val
+                    if v.len() == 0 || v[0..1] != "\"" { rewrite v = "\"" + v + "\"" }
+                    rewrite theme_fg = v
+                }
+                if tok.key == "bg" {
+                    set v = tok.val
+                    if v.len() == 0 || v[0..1] != "\"" { rewrite v = "\"" + v + "\"" }
+                    rewrite theme_bg = v
+                }
+            }
+        }
+        for i in 0..m.screens.len() {
+            rewrite code = code + this.generate_screen(m.screens[i], theme_fg, theme_bg) + "\n\n"
+        }
+        rewrite code = code + this.generate_bundle_class(m) + "\n"
+        return code
+    }
+
+    fun to_pascal_case(s: string) -> string {
+        if s.len() == 0 {
+            return ""
+        }
+        return upper(s[0..1]) + s[1..s.len()]
+    }
+
+    public fun generate_theme(t: ThemeDef) -> string {
+        set class_name = this.to_pascal_case(t.name)
+        set out: string = "public class " + class_name + " {\n"
+        rewrite out = out + "    public is_adaptive: bool\n"
+        for i in 0..t.tokens.len() {
+            rewrite out = out + "    public " + t.tokens[i].key + ": string\n"
+        }
+        rewrite out = out + "\n    public fun init() {\n"
+        set adapt_str: string = if t.is_adaptive { "true" } else { "false" }
+        rewrite out = out + "        rewrite this.is_adaptive = " + adapt_str + "\n"
+        for i in 0..t.tokens.len() {
+            set tok = t.tokens[i]
+            set v = tok.val
+            if v.len() == 0 || v[0..1] != "\"" {
+                rewrite v = "\"" + v + "\""
+            }
+            rewrite out = out + "        rewrite this." + tok.key + " = " + v + "\n"
+        }
+        if t.is_adaptive {
+            rewrite out = out + "        if this.is_adaptive {\n"
+            rewrite out = out + "            this.adapt_to_terminal(detect_is_dark_mode())\n"
+            rewrite out = out + "        }\n"
+        }
+        rewrite out = out + "    }\n"
+        if t.is_adaptive {
+            rewrite out = out + "\n    public fun adapt_to_terminal(is_dark: bool) {\n"
+            rewrite out = out + "        if !is_dark {\n"
+            rewrite out = out + "            if this.bg == \"#1e1e2e\" || this.bg == \"#181825\" { rewrite this.bg = \"#eff1f5\" }\n"
+            rewrite out = out + "            if this.fg == \"#cdd6f4\" || this.fg == \"#ffffff\" { rewrite this.fg = \"#4c4f69\" }\n"
+            rewrite out = out + "        } else {\n"
+            for i in 0..t.tokens.len() {
+                set tok = t.tokens[i]
+                set v = tok.val
+                if v.len() == 0 || v[0..1] != "\"" { rewrite v = "\"" + v + "\"" }
+                rewrite out = out + "            rewrite this." + tok.key + " = " + v + "\n"
+            }
+            rewrite out = out + "        }\n    }\n"
+        }
+        rewrite out = out + "}"
+        return out
+    }
+
+    public fun generate_component(c: ComponentDef) -> string {
+        set class_name = this.to_pascal_case(c.name)
+        set out: string = "public class " + class_name + " {\n"
+        rewrite out = out + "    public last_action: string\n"
+        rewrite out = out + "    public anim_frame: int64\n"
+        rewrite out = out + "    public layout_rects: Rect[]\n"
+        for i in 0..c.props.len() {
+            rewrite out = out + "    public " + c.props[i].name + ": " + c.props[i].type_name + "\n"
+        }
+        for i in 0..c.state_fields.len() {
+            rewrite out = out + "    public " + c.state_fields[i].name + ": " + c.state_fields[i].type_name + "\n"
+        }
+        rewrite out = out + "\n    public fun init(" + this.format_params(c.props) + ") {\n"
+        rewrite out = out + "        rewrite this.last_action = \"\"\n"
+        rewrite out = out + "        rewrite this.anim_frame = 0\n"
+        rewrite out = out + "        set empty_rects: Rect[] = []\n"
+        rewrite out = out + "        rewrite this.layout_rects = empty_rects\n"
+        for i in 0..c.props.len() {
+            set p_name = c.props[i].name
+            rewrite out = out + "        rewrite this." + p_name + " = " + p_name + "\n"
+        }
+        for i in 0..c.state_fields.len() {
+            set sf = c.state_fields[i]
+            rewrite out = out + "        rewrite this." + sf.name + " = " + sf.initial_val + "\n"
+        }
+        rewrite out = out + "    }\n\n"
+        rewrite out = out + this.generate_layout_method(ref c.root_widgets, "    ")
+        rewrite out = out + "    public fun draw(ref buf: TerminalBuffer) {\n"
+        rewrite out = out + "        rewrite this.anim_frame = this.anim_frame + 1\n"
+        for i in 0..c.root_widgets.len() {
+            rewrite out = out + this.generate_widget_draw(ref c.root_widgets[i], "        ", ref c.props, ref c.state_fields)
+        }
+        rewrite out = out + "    }\n\n"
+        rewrite out = out + this.generate_shortcuts_handler(ref c.shortcuts, "    ")
+        rewrite out = out + this.generate_mouse_handler("    ")
+        rewrite out = out + this.generate_state_methods(ref c.props, ref c.state_fields)
+        rewrite out = out + this.generate_event_methods(ref c.props, ref c.root_widgets)
+        rewrite out = out + "}"
+        return out
+    }
+
+    public fun generate_dialog(d: DialogDef) -> string {
+        set class_name = this.to_pascal_case(d.name)
+        set out: string = "public class " + class_name + " extends Dialog {\n"
+        rewrite out = out + "    public last_action: string\n"
+        for i in 0..d.props.len() {
+            rewrite out = out + "    public " + d.props[i].name + ": " + d.props[i].type_name + "\n"
+        }
+        for i in 0..d.state_fields.len() {
+            rewrite out = out + "    public " + d.state_fields[i].name + ": " + d.state_fields[i].type_name + "\n"
+        }
+        rewrite out = out + "\n    public fun init(" + this.format_params(d.props) + ") {\n"
+        rewrite out = out + "        rewrite this.last_action = \"\"\n"
+        set modal_str: string = if d.is_modal { "true" } else { "false" }
+        set dim_str: string = if d.dim_backdrop { "true" } else { "false" }
+        set eff_w: int32 = if d.size_w > 0 { d.size_w } else { cast(54, "int32") }
+        set eff_h: int32 = if d.size_h > 0 { d.size_h } else { cast(16, "int32") }
+        rewrite out = out + "        super(\"" + class_name + "\", \"\", cast(" + cast(eff_w, "string") + ", \"int32\"), cast(" + cast(eff_h, "string") + ", \"int32\"), " + modal_str + ", " + dim_str + ")\n"
+        for i in 0..d.props.len() {
+            set p_name = d.props[i].name
+            rewrite out = out + "        rewrite this." + p_name + " = " + p_name + "\n"
+        }
+        for i in 0..d.state_fields.len() {
+            set sf = d.state_fields[i]
+            rewrite out = out + "        rewrite this." + sf.name + " = " + sf.initial_val + "\n"
+        }
+        rewrite out = out + "    }\n\n"
+        rewrite out = out + "    public fun build_layout(ref ctx: LayoutContext) {\n    }\n\n"
+        rewrite out = out + "    public fun draw(ref buf: TerminalBuffer) {\n"
+        if d.dim_backdrop {
+            rewrite out = out + "        for r in 0..buf.height {\n"
+            rewrite out = out + "            for c in 0..buf.width {\n"
+            rewrite out = out + "                set cell = buf.get_cell(cast(c, \"int32\"), cast(r, \"int32\"))\n"
+            rewrite out = out + "                rewrite cell.dim = true\n"
+            rewrite out = out + "                buf.set_cell(cast(c, \"int32\"), cast(r, \"int32\"), cell)\n"
+            rewrite out = out + "            }\n"
+            rewrite out = out + "        }\n"
+        }
+        rewrite out = out + "        set dx = (buf.width - cast(" + cast(eff_w, "string") + ", \"int32\")) / cast(2, \"int32\")\n"
+        rewrite out = out + "        set dy = (buf.height - cast(" + cast(eff_h, "string") + ", \"int32\")) / cast(2, \"int32\")\n"
+        rewrite out = out + "        set d_bounds = init_rect(dx, dy, cast(" + cast(eff_w, "string") + ", \"int32\"), cast(" + cast(eff_h, "string") + ", \"int32\"))\n"
+        rewrite out = out + "        set d_blk = init BlockWidget(BORDER_ROUNDED, this.title, ALIGN_LEFT, \"#cdd6f4\", \"#181825\", true, \"\", 0, \"default\", \"#89b4fa\", \"#181825\", \"#181825\", true)\n"
+        rewrite out = out + "        d_blk.render(ref buf, ref d_bounds)\n"
+        rewrite this.dialog_row = 1
+        for i in 0..d.root_widgets.len() {
+            rewrite out = out + this.generate_dialog_widget_draw(ref d.root_widgets[i], "        ", eff_w, ref d.props, ref d.state_fields)
+        }
+        rewrite out = out + "    }\n\n"
+        rewrite out = out + this.generate_dialog_shortcuts_handler(ref d.shortcuts, "    ")
+        rewrite out = out + this.generate_mouse_handler("    ")
+        rewrite out = out + this.generate_state_methods(ref d.props, ref d.state_fields)
+        rewrite out = out + this.generate_event_methods(ref d.props, ref d.root_widgets)
+        rewrite out = out + "}"
+        return out
+    }
+
+    public fun generate_screen(s: ScreenDef, theme_fg: string, theme_bg: string) -> string {
+        set class_name = this.to_pascal_case(s.name)
+        set out: string = "public class " + class_name + " extends Screen {\n"
+        rewrite out = out + "    public last_action: string\n"
+        rewrite out = out + "    public anim_frame: int64\n"
+        rewrite out = out + "    public layout_rects: Rect[]\n"
+        for i in 0..s.state_fields.len() {
+            rewrite out = out + "    public " + s.state_fields[i].name + ": " + s.state_fields[i].type_name + "\n"
+        }
+        rewrite out = out + "\n    public fun init() {\n"
+        rewrite out = out + "        super(\"" + class_name + "\")\n"
+        rewrite out = out + "        rewrite this.last_action = \"\"\n"
+        rewrite out = out + "        rewrite this.anim_frame = 0\n"
+        rewrite out = out + "        set empty_rects: Rect[] = []\n"
+        rewrite out = out + "        rewrite this.layout_rects = empty_rects\n"
+        for i in 0..s.state_fields.len() {
+            set sf = s.state_fields[i]
+            rewrite out = out + "        rewrite this." + sf.name + " = " + sf.initial_val + "\n"
+        }
+        rewrite out = out + "    }\n\n"
+        rewrite out = out + this.generate_layout_method(ref s.root_widgets, "    ")
+        rewrite out = out + "    public fun draw(ref buf: TerminalBuffer) {\n"
+        rewrite out = out + "        rewrite this.anim_frame = this.anim_frame + 1\n"
+        rewrite out = out + "        buf.fill(init_cell(\" \", " + theme_fg + ", " + theme_bg + ", false, false, false, false, false))\n"
+        set empty_props: PropDef[] = []
+        for i in 0..s.root_widgets.len() {
+            rewrite out = out + this.generate_widget_draw(ref s.root_widgets[i], "        ", ref empty_props, ref s.state_fields)
+        }
+        rewrite out = out + "    }\n\n"
+        rewrite out = out + this.generate_shortcuts_handler(ref s.shortcuts, "    ")
+        rewrite out = out + this.generate_mouse_handler("    ")
+        rewrite out = out + this.generate_state_methods(ref empty_props, ref s.state_fields)
+        rewrite out = out + this.generate_event_methods(ref empty_props, ref s.root_widgets)
+        rewrite out = out + "}"
+        return out
+    }
+
+    fun format_params(props: PropDef[]) -> string {
+        set res: string = ""
+        for i in 0..props.len() {
+            if i > 0 {
+                rewrite res = res + ", "
+            }
+            set p = props[i]
+            rewrite res = res + p.name + ": " + p.type_name
+            if p.has_default {
+                rewrite res = res + " = " + p.default_val
+            }
+        }
+        return res
+    }
+
+    fun generate_layout_method(ref root_widgets: WidgetNode[], indent: string) -> string {
+        set out = indent + "public fun build_layout(ref ctx: LayoutContext) {\n"
+        rewrite out = out + indent + "    set nodes: LayoutNode[] = []\n"
+        if root_widgets.len() > 0 && (root_widgets[0].kind == "col" || root_widgets[0].kind == "row") {
+            set container = root_widgets[0]
+            for i in 0..container.children.len() {
+                set ch = container.children[i]
+                set h_val = this.resolve_coord_prop(ref ch, "height", "cast(1, \"int32\")")
+                set w_val = this.resolve_coord_prop(ref ch, "width", "cast(0, \"int32\")")
+                set is_fill = this.resolve_bool_prop(ref ch, "fill", "false") == "true"
+                set weight_val: string = if is_fill { "cast(1, \"int32\")" } else { "cast(0, \"int32\")" }
+                rewrite out = out + indent + "    nodes.push(init_layout_node(" + w_val + ", " + h_val + ", " + weight_val + ", \"stretch\"))\n"
+            }
+            if container.kind == "col" {
+                rewrite out = out + indent + "    rewrite this.layout_rects = layout_col(init_rect(cast(0, \"int32\"), cast(0, \"int32\"), ctx.width, ctx.height), cast(0, \"int32\"), cast(0, \"int32\"), cast(0, \"int32\"), \"start\", \"stretch\", nodes)\n"
+            } else {
+                rewrite out = out + indent + "    rewrite this.layout_rects = layout_row(init_rect(cast(0, \"int32\"), cast(0, \"int32\"), ctx.width, ctx.height), cast(0, \"int32\"), cast(0, \"int32\"), cast(0, \"int32\"), \"start\", \"stretch\", nodes)\n"
+            }
+        }
+        rewrite out = out + indent + "}\n\n"
+        return out
+    }
+
+    fun is_member_field(id: string, ref props: PropDef[], ref state_fields: StateFieldDef[]) -> bool {
+        for i in 0..props.len() {
+            if props[i].name == id {
+                return true
+            }
+        }
+        for i in 0..state_fields.len() {
+            if state_fields[i].name == id {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun resolve_bound_or_text(ref node: WidgetNode, ref props: PropDef[], ref state_fields: StateFieldDef[]) -> string {
+        for i in 0..node.props.len() {
+            if node.props[i].key == "bind" {
+                set target = node.props[i].val
+                if this.is_member_field(target, ref props, ref state_fields) {
+                    return "this." + target
+                }
+                return target
+            }
+        }
+        if node.pos_arg.len() > 0 {
+            if this.is_member_field(node.pos_arg, ref props, ref state_fields) {
+                return "this." + node.pos_arg
+            }
+            return this.resolve_text_expr(node.pos_arg)
+        }
+        return "\"\""
+    }
+
+    fun resolve_prop(ref node: WidgetNode, key: string, default_val: string) -> string {
+        for i in 0..node.props.len() {
+            if node.props[i].key == key {
+                return node.props[i].val
+            }
+        }
+        return default_val
+    }
+
+    fun resolve_color_expr(val: string, default_val: string) -> string {
+        if val.len() == 0 {
+            return default_val
+        }
+        if val.len() >= 6 && val[0..6] == "theme." {
+            return "this.theme." + val[6..]
+        }
+        if val.len() >= 5 && val[0..5] == "bind:" {
+            return "this." + val[5..]
+        }
+        if val[0..1] == "#" {
+            return "\"" + val + "\""
+        }
+        if val == "default" || val == "black" || val == "white" || val == "red" || val == "green" || val == "blue" || val == "cyan" || val == "yellow" || val == "magenta" {
+            return "\"" + val + "\""
+        }
+        return val
+    }
+
+    fun resolve_color_prop(ref node: WidgetNode, key: string, default_val: string) -> string {
+        for i in 0..node.props.len() {
+            if node.props[i].key == key {
+                return this.resolve_color_expr(node.props[i].val, default_val)
+            }
+        }
+        return default_val
+    }
+
+    fun resolve_border_constant(ref node: WidgetNode) -> string {
+        set b = this.resolve_prop(ref node, "border", "rounded")
+        if b == "rounded" { return "BORDER_ROUNDED" }
+        if b == "plain" || b == "single" { return "BORDER_PLAIN" }
+        if b == "double" { return "BORDER_DOUBLE" }
+        if b == "thick" || b == "bold" || b == "heavy" { return "BORDER_THICK" }
+        if b == "ascii" { return "BORDER_ASCII" }
+        if b == "none" { return "BORDER_NONE" }
+        return "BORDER_ROUNDED"
+    }
+
+    fun resolve_align_constant(ref node: WidgetNode, key: string, default_align: string) -> string {
+        set a = this.resolve_prop(ref node, key, default_align)
+        if a == "center" { return "ALIGN_CENTER" }
+        if a == "right" || a == "end" { return "ALIGN_RIGHT" }
+        return "ALIGN_LEFT"
+    }
+
+    fun resolve_wrap_constant(ref node: WidgetNode) -> string {
+        set w = this.resolve_prop(ref node, "wrap", "word")
+        if w == "none" { return "WRAP_NONE" }
+        if w == "char" { return "WRAP_CHAR" }
+        return "WRAP_WORD"
+    }
+
+    fun resolve_bound_or_text_prop(ref node: WidgetNode, key: string, default_val: string) -> string {
+        for i in 0..node.props.len() {
+            if node.props[i].key == key {
+                set raw = node.props[i].val
+                if raw.len() >= 5 && raw[0..5] == "bind:" {
+                    return "this." + raw[5..]
+                }
+                if raw.len() >= 3 && raw[0..3] == "tr\"" {
+                    return this.resolve_text_expr(raw)
+                }
+                return raw
+            }
+        }
+        return default_val
+    }
+
+    fun resolve_coord_prop(ref node: WidgetNode, key: string, default_val: string) -> string {
+        set v = this.resolve_prop(ref node, key, "")
+        if v.len() == 0 && key == "width" {
+            rewrite v = this.resolve_prop(ref node, "w", "")
+        }
+        if v.len() == 0 && key == "height" {
+            rewrite v = this.resolve_prop(ref node, "h", "")
+        }
+        if v.len() == 0 {
+            return default_val
+        }
+        if v.len() >= 5 && v[0..5] == "bind:" {
+            return "this." + v[5..]
+        }
+        if v == "100%" {
+            if key == "height" || key == "h" {
+                return "buf.height"
+            }
+            return "buf.width"
+        }
+        if v.len() > 1 && v[v.len() - 1..v.len()] == "%" {
+            set pct_str = v[0..v.len() - 1]
+            if key == "height" || key == "h" {
+                return "(buf.height * cast(" + pct_str + ", \"int32\")) / cast(100, \"int32\")"
+            }
+            return "(buf.width * cast(" + pct_str + ", \"int32\")) / cast(100, \"int32\")"
+        }
+        if contains(v, "buf.") {
+            return v
+        }
+        return "cast(" + v + ", \"int32\")"
+    }
+
+    fun build_responsive_condition(ref node: WidgetNode) -> string {
+        set cond: string = ""
+        set min_w = this.resolve_prop(ref node, "minWidth", "")
+        if min_w.len() == 0 {
+            rewrite min_w = this.resolve_prop(ref node, "min_w", "")
+        }
+        if min_w.len() == 0 {
+            rewrite min_w = this.resolve_prop(ref node, "hideBelow", "")
+        }
+        if min_w.len() > 0 {
+            set w_expr = "buf.width >= cast(" + min_w + ", \"int32\")"
+            rewrite cond = if cond.len() == 0 { w_expr } else { cond + " && " + w_expr }
+        }
+
+        set min_h = this.resolve_prop(ref node, "minHeight", "")
+        if min_h.len() == 0 {
+            rewrite min_h = this.resolve_prop(ref node, "min_h", "")
+        }
+        if min_h.len() > 0 {
+            set h_expr = "buf.height >= cast(" + min_h + ", \"int32\")"
+            rewrite cond = if cond.len() == 0 { h_expr } else { cond + " && " + h_expr }
+        }
+
+        set max_w = this.resolve_prop(ref node, "maxWidth", "")
+        if max_w.len() == 0 {
+            rewrite max_w = this.resolve_prop(ref node, "max_w", "")
+        }
+        if max_w.len() > 0 {
+            set mw_expr = "buf.width <= cast(" + max_w + ", \"int32\")"
+            rewrite cond = if cond.len() == 0 { mw_expr } else { cond + " && " + mw_expr }
+        }
+
+        set max_h = this.resolve_prop(ref node, "maxHeight", "")
+        if max_h.len() == 0 {
+            rewrite max_h = this.resolve_prop(ref node, "max_h", "")
+        }
+        if max_h.len() > 0 {
+            set mh_expr = "buf.height <= cast(" + max_h + ", \"int32\")"
+            rewrite cond = if cond.len() == 0 { mh_expr } else { cond + " && " + mh_expr }
+        }
+
+        set bp = this.resolve_prop(ref node, "breakpoint", "")
+        if bp.len() > 0 {
+            set bp_val = bp
+            if bp_val.len() >= 2 && bp_val[0..1] == "\"" && bp_val[bp_val.len() - 1..bp_val.len()] == "\"" {
+                rewrite bp_val = bp_val[1..bp_val.len() - 1]
+            }
+            set bp_expr: string = if bp_val == "desktop" {
+                "buf.width >= cast(120, \"int32\")"
+            } elif bp_val == "compact" {
+                "(buf.width >= cast(80, \"int32\") && buf.width < cast(120, \"int32\"))"
+            } elif bp_val == "compact+" {
+                "buf.width >= cast(80, \"int32\")"
+            } elif bp_val == "mobile" {
+                "buf.width < cast(80, \"int32\")"
+            } else {
+                ""
+            }
+            if bp_expr.len() > 0 {
+                rewrite cond = if cond.len() == 0 { bp_expr } else { cond + " && " + bp_expr }
+            }
+        }
+
+        return cond
+    }
+
+    fun resolve_bool_prop(ref node: WidgetNode, key: string, default_val: string) -> string {
+        set v = this.resolve_prop(ref node, key, "")
+        if v.len() == 0 {
+            return default_val
+        }
+        if v == "true" || v == "false" {
+            return v
+        }
+        if v.len() >= 5 && v[0..5] == "bind:" {
+            return "this." + v[5..]
+        }
+        return default_val
+    }
+
+    fun generate_widget_draw(ref node: WidgetNode, indent: string, ref props: PropDef[], ref state_fields: StateFieldDef[]) -> string {
+        set cond = this.build_responsive_condition(ref node)
+        set has_cond = cond.len() > 0
+        set w_indent: string = if has_cond { indent + "    " } else { indent }
+        set out: string = ""
+        set x_c = this.resolve_coord_prop(ref node, "x", "cast(0, \"int32\")")
+        set y_c = this.resolve_coord_prop(ref node, "y", "cast(0, \"int32\")")
+        set w_c = this.resolve_coord_prop(ref node, "width", "buf.width")
+        set h_c = this.resolve_coord_prop(ref node, "height", "buf.height")
+        if node.anim_expr.len() > 0 {
+            if contains(node.anim_expr, "slide") {
+                rewrite x_c = x_c + " + cast(this.anim_frame % 8, \"int32\")"
+            }
+        }
+        if node.kind == "text" {
+            set text_expr = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set fg = this.resolve_color_prop(ref node, "fg", "\"default\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            set bold = this.resolve_bool_prop(ref node, "bold", "false")
+            if node.anim_expr.len() > 0 && contains(node.anim_expr, "pulse") {
+                rewrite bold = "(this.anim_frame % 20 < 10)"
+            }
+            set dim = this.resolve_bool_prop(ref node, "dim", "false")
+            rewrite out = w_indent + "buf.draw_text(" + x_c + ", " + y_c + ", " + text_expr + ", " + fg + ", " + bg + ", " + bold + ", " + dim + ", false, false, false)\n"
+        } elif node.kind == "button" {
+            set btn_label = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set fg = this.resolve_color_prop(ref node, "fg", "\"cyan\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "buf.draw_text(" + x_c + ", " + y_c + ", \"[\" + " + btn_label + " + \"]\", " + fg + ", " + bg + ", true, false, false, false, false)\n"
+        } elif node.kind == "divider" {
+            set div_w = this.resolve_coord_prop(ref node, "width", "buf.width")
+            set fg = this.resolve_color_prop(ref node, "fg", "\"#45475a\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "for div_i in 0.." + div_w + " { buf.draw_text(" + x_c + " + cast(div_i, \"int32\"), " + y_c + ", \"─\", " + fg + ", " + bg + ", false, false, false, false, false) }\n"
+        } elif node.kind == "input" {
+            set bound = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set fg = this.resolve_color_prop(ref node, "fg", "\"white\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"#181825\"")
+            if bound != "\"\"" {
+                rewrite out = w_indent + "buf.draw_text(" + x_c + ", " + y_c + ", \"[ \" + " + bound + " + \" ]\", " + fg + ", " + bg + ", false, false, false, false, false)\n"
+            } else {
+                set ph = this.resolve_prop(ref node, "placeholder", "\"\"")
+                rewrite out = w_indent + "buf.draw_text(" + x_c + ", " + y_c + ", \"[ \" + " + ph + " + \" ]\", \"#585b70\", " + bg + ", false, false, false, false, false)\n"
+            }
+        } elif node.kind == "block" {
+            set b_style = this.resolve_border_constant(ref node)
+            set b_title = this.resolve_bound_or_text_prop(ref node, "title", "\"\"")
+            set b_align = this.resolve_align_constant(ref node, "titleAlign", "ALIGN_LEFT")
+            set b_fg = this.resolve_color_prop(ref node, "fg", "\"default\"")
+            set b_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            set b_border_fg = this.resolve_color_prop(ref node, "borderFg", "\"default\"")
+            set b_border_bg = this.resolve_color_prop(ref node, "borderBg", b_bg)
+            rewrite out = w_indent + "set blk = init BlockWidget(" + b_style + ", " + b_title + ", " + b_align + ", " + b_fg + ", " + b_bg + ", true, \"\", 0, \"default\", " + b_border_fg + ", " + b_border_bg + ", " + b_bg + ", true)\n"
+            rewrite out = out + w_indent + "set blk_bounds = init_rect(" + x_c + ", " + y_c + ", " + w_c + ", " + h_c + ")\n"
+            rewrite out = out + w_indent + "blk.render(ref buf, ref blk_bounds)\n"
+        } elif node.kind == "paragraph" {
+            set p_text = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set p_wrap = this.resolve_wrap_constant(ref node)
+            set p_fg = this.resolve_color_prop(ref node, "fg", "\"default\"")
+            set p_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            set p_align = this.resolve_align_constant(ref node, "align", "ALIGN_LEFT")
+            rewrite out = w_indent + "set p_w = init ParagraphWidget(" + p_text + ", " + p_wrap + ", " + p_align + ", cast(0, \"int32\"), cast(0, \"int32\"), " + p_fg + ", " + p_bg + ", false)\n"
+            rewrite out = out + w_indent + "p_w.render(ref buf, init_rect(" + x_c + ", " + y_c + ", " + w_c + ", " + h_c + "))\n"
+        } elif node.kind == "progress" {
+            set prg_val = this.resolve_bound_or_text_prop(ref node, "value", "")
+            if prg_val.len() == 0 { rewrite prg_val = this.resolve_bound_or_text_prop(ref node, "percent", "50.0") }
+            set prg_show_pct = this.resolve_bool_prop(ref node, "showPercentage", "true")
+            set prg_fg = this.resolve_color_prop(ref node, "fg", "\"green\"")
+            set prg_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "set prg_w = init ProgressWidget(" + prg_val + ", " + prg_show_pct + ", " + prg_fg + ", " + prg_bg + ")\n"
+            rewrite out = out + w_indent + "prg_w.render(ref buf, " + x_c + ", " + y_c + ", " + w_c + ")\n"
+        } elif node.kind == "gauge" {
+            set g_pct = this.resolve_bound_or_text_prop(ref node, "percent", "0.0")
+            set g_lbl = this.resolve_bound_or_text_prop(ref node, "label", "\"\"")
+            set g_fg = this.resolve_color_prop(ref node, "fg", "\"green\"")
+            set g_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            set g_h = this.resolve_coord_prop(ref node, "height", "cast(1, \"int32\")")
+            rewrite out = w_indent + "set g_w = init GaugeWidget(" + g_pct + ", " + g_lbl + ", true, " + g_fg + ", " + g_bg + ")\n"
+            rewrite out = out + w_indent + "g_w.render(ref buf, init_rect(" + x_c + ", " + y_c + ", " + w_c + ", " + g_h + "))\n"
+        } elif node.kind == "lineGauge" {
+            set lg_ratio = this.resolve_bound_or_text_prop(ref node, "ratio", "0.0")
+            set lg_lbl = this.resolve_bound_or_text_prop(ref node, "label", "\"\"")
+            set lg_fg = this.resolve_color_prop(ref node, "fg", "\"cyan\"")
+            set lg_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "set lg_w = init LineGaugeWidget(" + lg_ratio + ", " + lg_lbl + ", " + lg_fg + ", " + lg_bg + ")\n"
+            rewrite out = out + w_indent + "lg_w.render(ref buf, init_rect(" + x_c + ", " + y_c + ", " + w_c + ", cast(1, \"int32\")))\n"
+        } elif node.kind == "sparkline" {
+            set spk_data = this.resolve_bound_or_text_prop(ref node, "data", "")
+            set spk_max = this.resolve_coord_prop(ref node, "max", "cast(0, \"int32\")")
+            set spk_fg = this.resolve_color_prop(ref node, "fg", "\"green\"")
+            set spk_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "set spk_empty_data: int32[] = []\n"
+            rewrite out = out + w_indent + "spk_empty_data.push(cast(15, \"int32\")); spk_empty_data.push(cast(28, \"int32\")); spk_empty_data.push(cast(42, \"int32\")); spk_empty_data.push(cast(65, \"int32\")); spk_empty_data.push(cast(80, \"int32\")); spk_empty_data.push(cast(95, \"int32\")); spk_empty_data.push(cast(70, \"int32\")); spk_empty_data.push(cast(50, \"int32\")); spk_empty_data.push(cast(68, \"int32\")); spk_empty_data.push(cast(85, \"int32\")); spk_empty_data.push(cast(90, \"int32\")); spk_empty_data.push(cast(75, \"int32\")); spk_empty_data.push(cast(60, \"int32\")); spk_empty_data.push(cast(45, \"int32\")); spk_empty_data.push(cast(55, \"int32\")); spk_empty_data.push(cast(72, \"int32\")); spk_empty_data.push(cast(88, \"int32\")); spk_empty_data.push(cast(92, \"int32\")); spk_empty_data.push(cast(64, \"int32\")); spk_empty_data.push(cast(50, \"int32\"))\n"
+            set spk_expr: string = if spk_data.len() > 0 && spk_data != "[]" { spk_data } else { "spk_empty_data" }
+            rewrite out = out + w_indent + "set spk_w = init SparklineWidget(" + spk_expr + ", " + spk_max + ", " + spk_fg + ", " + spk_bg + ")\n"
+            rewrite out = out + w_indent + "spk_w.render(ref buf, init_rect(" + x_c + ", " + y_c + ", " + w_c + ", cast(1, \"int32\")))\n"
+        } elif node.kind == "barchart" {
+            set bc_vals = this.resolve_bound_or_text_prop(ref node, "values", "")
+            set bc_lbls = this.resolve_bound_or_text_prop(ref node, "labels", "")
+            set bc_max = this.resolve_coord_prop(ref node, "max", "cast(0, \"int32\")")
+            set bc_w = this.resolve_coord_prop(ref node, "width", "cast(3, \"int32\")")
+            set bc_gap = this.resolve_coord_prop(ref node, "gap", "cast(1, \"int32\")")
+            set bc_fg = this.resolve_color_prop(ref node, "fg", "\"cyan\"")
+            set bc_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "set bc_empty_vals: int32[] = []\n"
+            rewrite out = out + w_indent + "bc_empty_vals.push(cast(45, \"int32\")); bc_empty_vals.push(cast(72, \"int32\")); bc_empty_vals.push(cast(88, \"int32\")); bc_empty_vals.push(cast(95, \"int32\")); bc_empty_vals.push(cast(60, \"int32\")); bc_empty_vals.push(cast(78, \"int32\"))\n"
+            rewrite out = out + w_indent + "set bc_empty_lbls: string[] = []\n"
+            rewrite out = out + w_indent + "bc_empty_lbls.push(\"N1\"); bc_empty_lbls.push(\"N2\"); bc_empty_lbls.push(\"N3\"); bc_empty_lbls.push(\"N4\"); bc_empty_lbls.push(\"N5\"); bc_empty_lbls.push(\"N6\")\n"
+            set vals_expr: string = if bc_vals.len() > 0 && bc_vals != "[]" { bc_vals } else { "bc_empty_vals" }
+            set lbls_expr: string = if bc_lbls.len() > 0 && bc_lbls != "[]" { bc_lbls } else { "bc_empty_lbls" }
+            rewrite out = out + w_indent + "set bc_w = init BarChartWidget(" + vals_expr + ", " + lbls_expr + ", " + bc_max + ", " + bc_w + ", " + bc_gap + ", " + bc_fg + ", " + bc_bg + ")\n"
+            rewrite out = out + w_indent + "bc_w.render(ref buf, init_rect(" + x_c + ", " + y_c + ", " + w_c + ", " + h_c + "))\n"
+        } elif node.kind == "scrollbar" {
+            set sb_tot = this.resolve_coord_prop(ref node, "total", "cast(100, \"int32\")")
+            set sb_vp = this.resolve_coord_prop(ref node, "viewport", "cast(10, \"int32\")")
+            set sb_pos = this.resolve_coord_prop(ref node, "position", "cast(0, \"int32\")")
+            set sb_x = this.resolve_coord_prop(ref node, "x", "buf.width - cast(1, \"int32\")")
+            rewrite out = w_indent + "set sb_w = init ScrollbarWidget(" + sb_tot + ", " + sb_vp + ", " + sb_pos + ", true)\n"
+            rewrite out = out + w_indent + "sb_w.render(ref buf, init_rect(" + sb_x + ", " + y_c + ", cast(1, \"int32\"), " + h_c + "))\n"
+        } elif node.kind == "tree" {
+            set tr_items = this.resolve_bound_or_text_prop(ref node, "items", "")
+            set tr_fg = this.resolve_color_prop(ref node, "fg", "\"default\"")
+            set tr_bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            set tr_dir_fg = this.resolve_color_prop(ref node, "dirFg", "\"blue\"")
+            set tr_act_fg = this.resolve_color_prop(ref node, "activeFg", "\"white\"")
+            set tr_act_bg = this.resolve_color_prop(ref node, "activeBg", "\"blue\"")
+            rewrite out = w_indent + "set tr_empty_items: TreeItem[] = []\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"root\", \"cluster-root\", cast(0, \"int32\"), true, true))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"gw\", \"api-gateway\", cast(1, \"int32\"), true, true))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"gw1\", \"envoy-edge-01\", cast(2, \"int32\"), false, false))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"gw2\", \"envoy-edge-02\", cast(2, \"int32\"), false, false))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"auth\", \"auth-service\", cast(1, \"int32\"), true, true))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"auth1\", \"oauth-jwt-pool\", cast(2, \"int32\"), false, false))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"auth2\", \"rbac-enforcer\", cast(2, \"int32\"), false, false))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"db\", \"storage-mesh\", cast(1, \"int32\"), true, true))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"db1\", \"postgres-primary\", cast(2, \"int32\"), false, false))\n"
+            rewrite out = out + w_indent + "tr_empty_items.push(init_tree_item(\"db2\", \"redis-cache-01\", cast(2, \"int32\"), false, false))\n"
+            set items_expr: string = if tr_items.len() > 0 && tr_items != "[]" { tr_items } else { "tr_empty_items" }
+            rewrite out = out + w_indent + "set tree_w = init TreeWidget(" + items_expr + ", cast(0, \"int32\"), cast(0, \"int32\"), true, " + tr_fg + ", " + tr_bg + ", " + tr_dir_fg + ", " + tr_act_fg + ", " + tr_act_bg + ")\n"
+            rewrite out = out + w_indent + "tree_w.render(ref buf, init_rect(" + x_c + ", " + y_c + ", " + w_c + ", " + h_c + "))\n"
+        } elif node.kind == "checkbox" {
+            set lbl = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set is_chk = this.resolve_bool_prop(ref node, "checked", "false")
+            set chk_mark: string = if is_chk == "true" { "[x] " } else { "[ ] " }
+            set fg = this.resolve_color_prop(ref node, "fg", "\"default\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "buf.draw_text(" + x_c + ", " + y_c + ", \"" + chk_mark + "\" + " + lbl + ", " + fg + ", " + bg + ", false, false, false, false, false)\n"
+        } elif node.kind == "tabs" {
+            set tabs_items = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set fg = this.resolve_color_prop(ref node, "fg", "\"cyan\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "buf.draw_text(" + x_c + ", " + y_c + ", " + (if tabs_items != "\"\"" { tabs_items } else { "\"[ Tab 1 ]  Tab 2  Tab 3\"" }) + ", " + fg + ", " + bg + ", true, false, false, false, false)\n"
+        } elif node.kind == "table" {
+            set tb_id: string = if node.id_attr.len() > 0 { "\"" + node.id_attr + "\"" } else { "\"tbl\"" }
+            rewrite out = w_indent + "set tbl_w = init TableWidget(" + tb_id + ", true)\n"
+            rewrite out = out + w_indent + "tbl_w.add_column(\"NAME\", cast(16, \"int32\")).add_column(\"STATUS\", cast(12, \"int32\")).add_column(\"VALUE\", cast(10, \"int32\"))\n"
+            rewrite out = out + w_indent + "tbl_w.add_row([\"service-alpha\", \"running\", \"99.8%\"]).add_row([\"service-beta\", \"active\", \"94.2%\"])\n"
+            rewrite out = out + w_indent + "tbl_w.render(ref buf, " + x_c + ", " + y_c + ", " + w_c + ", " + h_c + ")\n"
+        } elif node.kind == "textarea" {
+            set ta_id: string = if node.id_attr.len() > 0 { "\"" + node.id_attr + "\"" } else { "\"ta\"" }
+            set ta_text = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set ta_ln = this.resolve_bool_prop(ref node, "showLineNumbers", "true")
+            set fg = this.resolve_color_prop(ref node, "fg", "\"default\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "set ta_w = init TextAreaWidget(" + ta_id + ", " + ta_text + ", " + ta_ln + ")\n"
+            rewrite out = out + w_indent + "ta_w.render(ref buf, " + x_c + ", " + y_c + ", " + w_c + ", " + h_c + ", " + fg + ", " + bg + ")\n"
+        } elif node.kind == "list" {
+            set lst_id: string = if node.id_attr.len() > 0 { "\"" + node.id_attr + "\"" } else { "\"lst\"" }
+            set lst_vr = this.resolve_coord_prop(ref node, "visibleRows", "cast(10, \"int32\")")
+            rewrite out = w_indent + "set lst_w = init ListWidget(" + lst_id + ", " + lst_vr + ")\n"
+            rewrite out = out + w_indent + "lst_w.add_item(\"Item 1\").add_item(\"Item 2\").add_item(\"Item 3\")\n"
+            rewrite out = out + w_indent + "lst_w.render(ref buf, " + x_c + ", " + y_c + ", " + w_c + ")\n"
+        } elif node.kind == "radio" || node.kind == "radiogroup" {
+            set rad_id: string = if node.id_attr.len() > 0 { "\"" + node.id_attr + "\"" } else { "\"rad\"" }
+            set rad_vert = this.resolve_bool_prop(ref node, "vertical", "true")
+            rewrite out = w_indent + "set rad_w = init RadioGroupWidget(" + rad_id + ", 0, false)\n"
+            rewrite out = out + w_indent + "rad_w.add_item(\"Option A\").add_item(\"Option B\").add_item(\"Option C\")\n"
+            rewrite out = out + w_indent + "rad_w.render(ref buf, " + x_c + ", " + y_c + ", " + rad_vert + ")\n"
+        } elif node.kind == "canvas" {
+            set fg = this.resolve_color_prop(ref node, "fg", "\"green\"")
+            set bg = this.resolve_color_prop(ref node, "bg", "\"default\"")
+            rewrite out = w_indent + "set cv_w = init CanvasWidget(\"canvas_main\", " + w_c + ", " + h_c + ", " + fg + ", " + bg + ")\n"
+            rewrite out = out + w_indent + "cv_w.draw_line(cast(0, \"int32\"), " + h_c + " * cast(4, \"int32\") - cast(2, \"int32\"), " + w_c + " * cast(2, \"int32\") - cast(2, \"int32\"), cast(2, \"int32\"))\n"
+            rewrite out = out + w_indent + "cv_w.draw_line(cast(0, \"int32\"), cast(2, \"int32\"), " + w_c + " * cast(2, \"int32\") - cast(2, \"int32\"), " + h_c + " * cast(4, \"int32\") - cast(2, \"int32\"))\n"
+            rewrite out = out + w_indent + "cv_w.render(ref buf, " + x_c + ", " + y_c + ")\n"
+        }
+        for i in 0..node.children.len() {
+            rewrite out = out + this.generate_widget_draw(ref node.children[i], w_indent, ref props, ref state_fields)
+        }
+        if has_cond {
+            return indent + "if " + cond + " {\n" + out + indent + "}\n"
+        }
+        return out
+    }
+
+    fun generate_dialog_widget_draw(ref node: WidgetNode, indent: string, eff_w: int32, ref props: PropDef[], ref state_fields: StateFieldDef[]) -> string {
+        set cond = this.build_responsive_condition(ref node)
+        set has_cond = cond.len() > 0
+        set w_indent: string = if has_cond { indent + "    " } else { indent }
+        set out: string = ""
+        set cur_r = "dy + cast(" + cast(this.dialog_row, "string") + ", \"int32\")"
+        set inner_w = "cast(" + cast(eff_w - 4, "string") + ", \"int32\")"
+        if node.kind == "text" || node.kind == "paragraph" {
+            set text_expr = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            rewrite out = w_indent + "buf.draw_text(dx + cast(2, \"int32\"), " + cur_r + ", " + text_expr + ", \"#cdd6f4\", \"#181825\", false, false, false, false, false)\n"
+            rewrite this.dialog_row = this.dialog_row + 1
+        } elif node.kind == "input" {
+            set val_expr = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set ph_expr = this.resolve_bound_or_text_prop(ref node, "placeholder", "\"\"")
+            rewrite out = w_indent + "set inp_disp = if " + val_expr + ".len() > 0 { " + val_expr + " } else { " + ph_expr + " }\n"
+            rewrite out = out + w_indent + "buf.draw_text(dx + cast(2, \"int32\"), " + cur_r + ", \"> \" + inp_disp, \"#89dceb\", \"#313244\", false, false, false, false, false)\n"
+            rewrite this.dialog_row = this.dialog_row + 1
+        } elif node.kind == "checkbox" {
+            set lbl = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            set is_chk = this.resolve_bool_prop(ref node, "checked", "false")
+            set chk_m: string = if is_chk == "true" { "\"[x] \" + " } else { "\"[ ] \" + " }
+            rewrite out = w_indent + "buf.draw_text(dx + cast(2, \"int32\"), " + cur_r + ", " + chk_m + lbl + ", \"#cdd6f4\", \"#181825\", false, false, false, false, false)\n"
+            rewrite this.dialog_row = this.dialog_row + 1
+        } elif node.kind == "progress" {
+            set prg_val = this.resolve_coord_prop(ref node, "value", "cast(0, \"int32\")")
+            set prg_pct = this.resolve_bool_prop(ref node, "showPercentage", "true")
+            rewrite out = w_indent + "set dlg_prg = init ProgressWidget(" + prg_val + ", " + prg_pct + ", \"green\", \"#181825\")\n"
+            rewrite out = out + w_indent + "dlg_prg.render(ref buf, dx + cast(2, \"int32\"), " + cur_r + ", " + inner_w + ")\n"
+            rewrite this.dialog_row = this.dialog_row + 1
+        } elif node.kind == "gauge" {
+            set g_pct = this.resolve_bound_or_text_prop(ref node, "percent", "0.0")
+            set g_lbl = this.resolve_bound_or_text_prop(ref node, "label", "\"\"")
+            rewrite out = w_indent + "set dlg_g = init GaugeWidget(" + g_pct + ", " + g_lbl + ", true, \"green\", \"#181825\")\n"
+            rewrite out = out + w_indent + "dlg_g.render(ref buf, init_rect(dx + cast(2, \"int32\"), " + cur_r + ", " + inner_w + ", cast(1, \"int32\")))\n"
+            rewrite this.dialog_row = this.dialog_row + 1
+        } elif node.kind == "divider" {
+            rewrite out = w_indent + "for div_c in 1..(cast(" + cast(eff_w - 1, "string") + ", \"int32\")) { buf.draw_text(dx + cast(div_c, \"int32\"), " + cur_r + ", \"─\", \"#45475a\", \"#181825\", false, false, false, false, false) }\n"
+            rewrite this.dialog_row = this.dialog_row + 1
+        } elif node.kind == "button" {
+            set btn_label = this.resolve_bound_or_text(ref node, ref props, ref state_fields)
+            rewrite out = w_indent + "buf.draw_text(dx + cast(2, \"int32\"), " + cur_r + ", \"[\" + " + btn_label + " + \"]\", \"#89b4fa\", \"#181825\", true, false, false, false, false)\n"
+            rewrite this.dialog_row = this.dialog_row + 1
+        }
+        for i in 0..node.children.len() {
+            rewrite out = out + this.generate_dialog_widget_draw(ref node.children[i], w_indent, eff_w, ref props, ref state_fields)
+        }
+        if has_cond {
+            return indent + "if " + cond + " {\n" + out + indent + "}\n"
+        }
+        return out
+    }
+
+    fun collect_tree_events(ref node: WidgetNode, ref events: WidgetEvent[], ref ids: string[], ref id_handlers: string[]) {
+        for i in 0..node.events.len() {
+            events.push(node.events[i])
+            if node.id_attr.len() > 0 {
+                ids.push(node.id_attr)
+                id_handlers.push(node.events[i].handler)
+            }
+        }
+        for i in 0..node.children.len() {
+            this.collect_tree_events(ref node.children[i], ref events, ref ids, ref id_handlers)
+        }
+    }
+
+    fun shortcut_to_key_condition(combo: string) -> string {
+        if combo == "Ctrl+S" || combo == "ctrl+s" {
+            return "(key.ctrl && (key.char_val == \"s\" || key.char_val == \"S\" || key.code == 115 || key.code == 19))"
+        }
+        if combo == "Ctrl+O" || combo == "ctrl+o" {
+            return "(key.ctrl && (key.char_val == \"o\" || key.char_val == \"O\" || key.code == 111 || key.code == 15))"
+        }
+        if combo == "Ctrl+Q" || combo == "ctrl+q" {
+            return "(key.ctrl && (key.char_val == \"q\" || key.char_val == \"Q\" || key.code == 113 || key.code == 17))"
+        }
+        if combo == "Ctrl+\\" || combo == "ctrl+\\" || combo == "Ctrl+\\\\" {
+            return "((key.ctrl && key.char_val == \"\\\\\") || key.code == 28 || (key.ctrl && key.code == 31))"
+        }
+        if combo == "F1" || combo == "f1" {
+            return "(key.code == KEY_F1)"
+        }
+        if combo == "Tab" || combo == "tab" {
+            return "(key.code == KEY_TAB)"
+        }
+        if combo == "Esc" || combo == "esc" || combo == "Escape" {
+            return "(key.code == KEY_ESC)"
+        }
+        if combo == "Enter" || combo == "enter" {
+            return "(key.code == KEY_ENTER)"
+        }
+        if combo == "Space" || combo == "space" {
+            return "(key.code == KEY_SPACE)"
+        }
+        if combo == "Up" || combo == "up" {
+            return "(key.code == KEY_UP)"
+        }
+        if combo == "Down" || combo == "down" {
+            return "(key.code == KEY_DOWN)"
+        }
+        if combo == "Left" || combo == "left" {
+            return "(key.code == KEY_LEFT)"
+        }
+        if combo == "Right" || combo == "right" {
+            return "(key.code == KEY_RIGHT)"
+        }
+        if combo == "q" || combo == "Q" {
+            return "(key.char_val == \"q\" || key.char_val == \"Q\")"
+        }
+        if combo == "z" || combo == "Z" {
+            return "(key.char_val == \"z\" || key.char_val == \"Z\")"
+        }
+        if combo == "x" || combo == "X" {
+            return "(key.char_val == \"x\" || key.char_val == \"X\")"
+        }
+        if combo == "?" {
+            return "(key.char_val == \"?\")"
+        }
+        return "(key.char_val == \"" + combo + "\")"
+    }
+
+    fun generate_shortcuts_handler(ref shortcuts: ShortcutDef[], indent: string) -> string {
+        set out: string = indent + "public fun handle_key(key: KeyEvent) -> bool {\n"
+        for i in 0..shortcuts.len() {
+            set s = shortcuts[i]
+            set cond = this.shortcut_to_key_condition(s.key_combo)
+            rewrite out = out + indent + "    if " + cond + " {\n"
+            rewrite out = out + indent + "        this.trigger_event(\"" + s.action_name + "\")\n"
+            rewrite out = out + indent + "        return true\n"
+            rewrite out = out + indent + "    }\n"
+        }
+        rewrite out = out + indent + "    return false\n"
+        rewrite out = out + indent + "}\n\n"
+        return out
+    }
+
+    fun generate_dialog_shortcuts_handler(ref shortcuts: ShortcutDef[], indent: string) -> string {
+        set out: string = indent + "public fun handle_key(key: KeyEvent) -> bool {\n"
+        for i in 0..shortcuts.len() {
+            set s = shortcuts[i]
+            set cond = this.shortcut_to_key_condition(s.key_combo)
+            rewrite out = out + indent + "    if " + cond + " {\n"
+            rewrite out = out + indent + "        this.trigger_event(\"" + s.action_name + "\")\n"
+            rewrite out = out + indent + "        return true\n"
+            rewrite out = out + indent + "    }\n"
+        }
+        rewrite out = out + indent + "    if key.code == KEY_ESC || (key.code == KEY_CHAR && (key.char_val == \"q\" || key.char_val == \"Q\")) {\n"
+        rewrite out = out + indent + "        this.trigger_event(\"onClose\")\n"
+        rewrite out = out + indent + "        return true\n"
+        rewrite out = out + indent + "    }\n"
+        rewrite out = out + indent + "    return false\n"
+        rewrite out = out + indent + "}\n\n"
+        return out
+    }
+
+    fun generate_mouse_handler(indent: string) -> string {
+        set out: string = indent + "public fun handle_mouse(m: MouseEvent) -> bool {\n"
+        rewrite out = out + indent + "    return false\n"
+        rewrite out = out + indent + "}\n\n"
+        return out
+    }
+
+    fun generate_state_methods(ref props: PropDef[], ref state_fields: StateFieldDef[]) -> string {
+        set out: string = ""
+        for i in 0..props.len() {
+            set p = props[i]
+            rewrite out = out + "    public fun set_" + p.name + "(val: " + p.type_name + ") {\n"
+            rewrite out = out + "        rewrite this." + p.name + " = val\n"
+            rewrite out = out + "    }\n\n"
+            rewrite out = out + "    public fun get_" + p.name + "() -> " + p.type_name + " {\n"
+            rewrite out = out + "        return this." + p.name + "\n"
+            rewrite out = out + "    }\n\n"
+        }
+        for i in 0..state_fields.len() {
+            set sf = state_fields[i]
+            rewrite out = out + "    public fun set_" + sf.name + "(val: " + sf.type_name + ") {\n"
+            rewrite out = out + "        rewrite this." + sf.name + " = val\n"
+            rewrite out = out + "    }\n\n"
+            rewrite out = out + "    public fun get_" + sf.name + "() -> " + sf.type_name + " {\n"
+            rewrite out = out + "        return this." + sf.name + "\n"
+            rewrite out = out + "    }\n\n"
+        }
+        rewrite out = out + "    public fun update_state(key: string, val: string) {\n"
+        for i in 0..props.len() {
+            set p = props[i]
+            if p.type_name == "string" {
+                rewrite out = out + "        if key == \"" + p.name + "\" { rewrite this." + p.name + " = val }\n"
+            } elif p.type_name == "bool" {
+                rewrite out = out + "        if key == \"" + p.name + "\" { rewrite this." + p.name + " = (val == \"true\") }\n"
+            } elif p.type_name == "int32" {
+                rewrite out = out + "        if key == \"" + p.name + "\" { rewrite this." + p.name + " = cast(val, \"int32\") }\n"
+            }
+        }
+        for i in 0..state_fields.len() {
+            set sf = state_fields[i]
+            if sf.type_name == "string" {
+                rewrite out = out + "        if key == \"" + sf.name + "\" { rewrite this." + sf.name + " = val }\n"
+            } elif sf.type_name == "bool" {
+                rewrite out = out + "        if key == \"" + sf.name + "\" { rewrite this." + sf.name + " = (val == \"true\") }\n"
+            } elif sf.type_name == "int32" {
+                rewrite out = out + "        if key == \"" + sf.name + "\" { rewrite this." + sf.name + " = cast(val, \"int32\") }\n"
+            }
+        }
+        rewrite out = out + "    }\n\n"
+        return out
+    }
+
+    fun generate_event_methods(ref props: PropDef[], ref root_widgets: WidgetNode[]) -> string {
+        set out: string = ""
+        set events: WidgetEvent[] = []
+        set ids: string[] = []
+        set id_handlers: string[] = []
+        for i in 0..root_widgets.len() {
+            this.collect_tree_events(ref root_widgets[i], ref events, ref ids, ref id_handlers)
+        }
+
+        for i in 0..props.len() {
+            set p = props[i]
+            if p.type_name == "fun()" {
+                rewrite out = out + "    public fun trigger_" + p.name + "() {\n"
+                rewrite out = out + "        set f = this." + p.name + "\n"
+                rewrite out = out + "        f()\n"
+                rewrite out = out + "    }\n\n"
+            } elif p.type_name == "fun()?" {
+                rewrite out = out + "    public fun trigger_" + p.name + "() {\n"
+                rewrite out = out + "        if this." + p.name + " != null {\n"
+                rewrite out = out + "            set f = this." + p.name + "\n"
+                rewrite out = out + "            f()\n"
+                rewrite out = out + "        }\n"
+                rewrite out = out + "    }\n\n"
+            } elif p.type_name == "fun(string)" {
+                rewrite out = out + "    public fun trigger_" + p.name + "(arg: string) {\n"
+                rewrite out = out + "        set f = this." + p.name + "\n"
+                rewrite out = out + "        f(arg)\n"
+                rewrite out = out + "    }\n\n"
+            }
+        }
+
+        rewrite out = out + "    public fun pop_action() -> string {\n"
+        rewrite out = out + "        set a = this.last_action\n"
+        rewrite out = out + "        rewrite this.last_action = \"\"\n"
+        rewrite out = out + "        return a\n"
+        rewrite out = out + "    }\n\n"
+        rewrite out = out + "    public fun trigger_event(event_name: string) {\n"
+        rewrite out = out + "        rewrite this.last_action = event_name\n"
+        for i in 0..props.len() {
+            set p = props[i]
+            if p.type_name == "fun()" {
+                rewrite out = out + "        if event_name == \"" + p.name + "\" {\n"
+                rewrite out = out + "            set f = this." + p.name + "\n"
+                rewrite out = out + "            f()\n"
+                rewrite out = out + "            return\n"
+                rewrite out = out + "        }\n"
+            }
+        }
+        for i in 0..events.len() {
+            set ev = events[i]
+            for p_idx in 0..props.len() {
+                if props[p_idx].name == ev.handler && props[p_idx].type_name == "fun()" {
+                    rewrite out = out + "        if event_name == \"" + ev.name + "\" || event_name == \"" + ev.handler + "\" {\n"
+                    rewrite out = out + "            set f = this." + ev.handler + "\n"
+                    rewrite out = out + "            f()\n"
+                    rewrite out = out + "            return\n"
+                    rewrite out = out + "        }\n"
+                }
+            }
+        }
+        rewrite out = out + "    }\n\n"
+
+        rewrite out = out + "    public fun click_widget(widget_id: string) {\n"
+        for i in 0..ids.len() {
+            set wid = ids[i]
+            set h = id_handlers[i]
+            for p_idx in 0..props.len() {
+                if props[p_idx].name == h && props[p_idx].type_name == "fun()" {
+                    rewrite out = out + "        if widget_id == \"" + wid + "\" {\n"
+                    rewrite out = out + "            set f = this." + h + "\n"
+                    rewrite out = out + "            f()\n"
+                    rewrite out = out + "            return\n"
+                    rewrite out = out + "        }\n"
+                }
+            }
+        }
+        rewrite out = out + "    }\n"
+        return out
+    }
+
+    fun resolve_text_expr(raw: string) -> string {
+        if raw.len() >= 3 && raw[0..3] == "tr\"" {
+            set key = raw[3..raw.len() - 1]
+            return "get_translation(\"" + key + "\", \"" + this.default_locale + "\")"
+        }
+        if raw.len() == 0 {
+            return "\"\""
+        }
+        return raw
+    }
+
+    #[region::capacity(2097152)]
+    public fun generate_translations(catalog: LocaleCatalog?) -> string {
+        set out: string = "public fun get_translation(key: string, lang: string = \"en\") -> string {\n"
+        if catalog == null {
+            rewrite out = out + "    return key\n}"
+            return out
+        }
+        set cat = catalog ?? init LocaleCatalog()
+        set unique_keys: string[] = []
+        for i in 0..cat.keys.len() {
+            set k = cat.keys[i]
+            set found = false
+            for u in 0..unique_keys.len() {
+                if unique_keys[u] == k {
+                    rewrite found = true
+                    break
+                }
+            }
+            if !found {
+                unique_keys.push(k)
+            }
+        }
+
+        for i in 0..unique_keys.len() {
+            set k = unique_keys[i]
+            rewrite out = out + "    if key == \"" + k + "\" {\n"
+            set en_val: string = ""
+            for j in 0..cat.keys.len() {
+                if cat.keys[j] == k {
+                    set l = cat.langs[j]
+                    set text = cat.texts[j]
+                    rewrite out = out + "        if lang == \"" + l + "\" { return \"" + text + "\" }\n"
+                    if l == "en" {
+                        rewrite en_val = text
+                    }
+                }
+            }
+            if en_val.len() > 0 {
+                rewrite out = out + "        return \"" + en_val + "\"\n    }\n"
+            } else {
+                rewrite out = out + "        return \"" + k + "\"\n    }\n"
+            }
+        }
+        rewrite out = out + "    return key\n}"
+        return out
+    }
+
+    fun generate_bundle_class(m: SpesModule) -> string {
+        set out: string = "public class UiBundle {\n"
+        rewrite out = out + "    public fun init() {\n    }\n\n"
+        rewrite out = out + "    public fun tr(key: string, lang: string = \"" + this.default_locale + "\") -> string {\n"
+        rewrite out = out + "        return get_translation(key, lang)\n    }\n}"
+        return out
+    }
+}

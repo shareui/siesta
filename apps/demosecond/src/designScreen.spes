@@ -1,0 +1,64 @@
+extern designScreen
+
+screen designScreen {
+  shortcuts {
+    "z": onPrev
+    "x": onNext
+    "q": onQuit
+    "?": onHelp
+  }
+  col {
+    block(border: rounded, title: "Rounded Border Style", titleAlign: left, fg: "#cdd6f4", bg: "#181825", borderFg: "#89b4fa", borderBg: "#181825") {
+      x: 1
+      y: 1
+      width: 48
+      height: 7
+    }
+    text("Clean curved corners for modern UI.", x: 3, y: 2, fg: "#cdd6f4", bg: "#181825")
+    text("Tokens: top-left, top-right, bottom arcs.", x: 3, y: 3, fg: "#585b70", bg: "#181825")
+    text("Used in panels, cards and modals.", x: 3, y: 4, fg: "#89b4fa", bg: "#181825")
+    text("Sample widget: [ Active Button ]", x: 3, y: 5, fg: "#a6e3a1", bg: "#181825", bold: true)
+
+    block(border: double, title: "Double Frame Border", titleAlign: center, fg: "#cdd6f4", bg: "#181825", borderFg: "#a6e3a1", borderBg: "#181825", hideBelow: 96) {
+      x: 50
+      y: 1
+      width: 48
+      height: 7
+    }
+    text("Double-line border with bold presence.", x: 52, y: 2, fg: "#cdd6f4", bg: "#181825", hideBelow: 96)
+    text("Ideal for important alerts and inspectors.", x: 52, y: 3, fg: "#585b70", bg: "#181825", hideBelow: 96)
+    text("Features full unicode double joints.", x: 52, y: 4, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("Sample widget: [ Confirmed ]", x: 52, y: 5, fg: "#f9e2af", bg: "#181825", bold: true, hideBelow: 96)
+
+    block(border: thick, title: "Thick Heavy Border", titleAlign: left, fg: "#cdd6f4", bg: "#181825", borderFg: "#f9e2af", borderBg: "#181825") {
+      x: 1
+      y: 8
+      width: 48
+      height: 7
+    }
+    text("Heavy stroke border for high contrast.", x: 3, y: 9, fg: "#cdd6f4", bg: "#181825")
+    text("Perfect for focused or primary components.", x: 3, y: 10, fg: "#585b70", bg: "#181825")
+    text("Compatible with high-DPI terminals.", x: 3, y: 11, fg: "#f9e2af", bg: "#181825")
+    text("Sample widget: [ Primary Focus ]", x: 3, y: 12, fg: "#89b4fa", bg: "#181825", bold: true)
+
+    block(border: ascii, title: "Classic ASCII Frame", titleAlign: right, fg: "#cdd6f4", bg: "#181825", borderFg: "#f38ba8", borderBg: "#181825", hideBelow: 96) {
+      x: 50
+      y: 8
+      width: 48
+      height: 7
+    }
+    text("Fallback ASCII (+, -, |) frames.", x: 52, y: 9, fg: "#cdd6f4", bg: "#181825", hideBelow: 96)
+    text("100% compatible with legacy TTY consoles.", x: 52, y: 10, fg: "#585b70", bg: "#181825", hideBelow: 96)
+    text("No unicode required; pure 7-bit ASCII.", x: 52, y: 11, fg: "#f38ba8", bg: "#181825", hideBelow: 96)
+    text("Sample widget: [ Legacy Mode ]", x: 52, y: 12, fg: "#cdd6f4", bg: "#181825", bold: true, hideBelow: 96)
+
+    block(border: rounded, title: "Braille Vector Canvas", fg: "#cdd6f4", bg: "#181825", borderFg: "#89b4fa", borderBg: "#181825", minHeight: 22) {
+      x: 1
+      y: 15
+      width: 97
+      height: 7
+    }
+    canvas(fg: "#a6e3a1", bg: "#181825", x: 3, y: 16, width: 93, height: 4, minHeight: 22)
+    text("Vector lines and curves rendered using 2x4 braille dot matrices.", x: 18, y: 18, fg: "#585b70", bg: "#181825", dim: true, minHeight: 22)
+  }
+}

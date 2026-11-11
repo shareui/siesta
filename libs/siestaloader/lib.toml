@@ -1,0 +1,26 @@
+[lib]
+name = "siestaloader"
+version = "0.1.0"
+entry = "siestaloader/lib.ykn"
+yukino = ["0.1.0", "+"] # [min, max]
+output = "macro"
+includes = ["core", "stdlib", "macrosdk"]
+
+[test]
+threads = "auto"
+timeout_ms = 10000
+capture_output = true
+fail_fast = false
+tests_dir = "tests"
+
+[features]
+default = []
+
+[libs.runtime]
+siesta_core = { path = "../core" }
+
+[libs.build]
+
+[libs.static]
+archives = []
+system = []

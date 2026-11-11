@@ -1,0 +1,269 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+load ..cell: init_cell
+
+fun abs_i32(v: int32) -> int32 {
+    if v < 0 { return -v }
+    return v
+}
+
+public fun braille_dot_mask(sub_x: int32, sub_y: int32) -> int32 {
+    if sub_x == 0 {
+        if sub_y == 0 { return 1 }
+        if sub_y == 1 { return 2 }
+        if sub_y == 2 { return 4 }
+        if sub_y == 3 { return 64 }
+    }
+    if sub_x == 1 {
+        if sub_y == 0 { return 8 }
+        if sub_y == 1 { return 16 }
+        if sub_y == 2 { return 32 }
+        if sub_y == 3 { return 128 }
+    }
+    return 0
+}
+
+public fun braille_to_char(pattern: int32) -> string {
+    if pattern <= 0 { return " " }
+    // unicode braille rng
+    // 10240 (0x2800)
+    set code_pt = 10240 + (pattern & 255)
+    return cast(cast(code_pt, "char"), "string")
+}
+
+public fun vertical_block_char(fraction: float64) -> string {
+    if fraction <= 0.0 { return " " }
+    if fraction <= 0.125 { return " " }
+    if fraction <= 0.25 { return "▂" }
+    if fraction <= 0.375 { return "▃" }
+    if fraction <= 0.5 { return "▄" }
+    if fraction <= 0.625 { return "▅" }
+    if fraction <= 0.75 { return "▆" }
+    if fraction <= 0.875 { return "▇" }
+    return "█"
+}
+
+public class CanvasWidget {
+    public id: string
+    public width: int32
+    public height: int32
+    public fg: string
+    public bg: string
+    public grid: int32[]
+
+    public fun init(id: string, width: int32, height: int32, fg: string = "default", bg: string = "default") {
+        set total = width * height
+        set g: int32[] = []
+
+        for i in 0..total { g.push(0) }
+        
+        rewrite this.id = id
+        rewrite this.width = width
+        rewrite this.height = height
+        rewrite this.fg = fg
+        rewrite this.bg = bg
+        rewrite this.grid = g
+    }
+
+    public fun pixel_width() -> int32 {
+        return this.width * 2
+    }
+
+    public fun pixel_height() -> int32 {
+        return this.height * 4
+    }
+
+    public fun clear() -> CanvasWidget {
+        for i in 0..this.grid.len() {
+            rewrite this.grid[i] = 0
+        }
+        return this
+    }
+
+    public fun set_pixel(px: int32, py: int32) -> CanvasWidget {
+        if px < 0 || px >= this.pixel_width() || py < 0 || py >= this.pixel_height() {
+            return this
+        }
+        set cx = px / 2
+        set cy = py / 4
+        set mask = braille_dot_mask(px % 2, py % 4)
+        set idx = cast(cy * this.width + cx, "int64")
+        set cur = this.grid[idx]
+        rewrite this.grid[idx] = cur | mask
+        return this
+    }
+
+    public fun clear_pixel(px: int32, py: int32) -> CanvasWidget {
+        if px < 0 || px >= this.pixel_width() || py < 0 || py >= this.pixel_height() {
+            return this
+        }
+        set cx = px / 2
+        set cy = py / 4
+        set mask = braille_dot_mask(px % 2, py % 4)
+        set idx = cast(cy * this.width + cx, "int64")
+        set cur = this.grid[idx]
+        rewrite this.grid[idx] = cur & (~mask)
+        return this
+    }
+
+    public fun get_pixel(px: int32, py: int32) -> bool {
+        if px < 0 || px >= this.pixel_width() || py < 0 || py >= this.pixel_height() {
+            return false
+        }
+        set cx = px / 2
+        set cy = py / 4
+        set mask = braille_dot_mask(px % 2, py % 4)
+        set idx = cast(cy * this.width + cx, "int64")
+        return (this.grid[idx] & mask) != 0
+    }
+
+    public fun draw_line(x0: int32, y0: int32, x1: int32, y1: int32) -> CanvasWidget {
+        set dx = abs_i32(x1 - x0)
+        set sx: int32 = 1
+        if x0 >= x1 {
+            rewrite sx = -1
+        }
+        set dy = -abs_i32(y1 - y0)
+        set sy: int32 = 1
+        if y0 >= y1 {
+            rewrite sy = -1
+        }
+        set err = dx + dy
+
+        set cx = x0
+        set cy = y0
+        while true {
+            this.set_pixel(cx, cy)
+            if cx == x1 && cy == y1 {
+                break
+            }
+            set e2 = 2 * err
+            if e2 >= dy {
+                rewrite err = err + dy
+                rewrite cx = cx + sx
+            }
+            if e2 <= dx {
+                rewrite err = err + dx
+                rewrite cy = cy + sy
+            }
+        }
+        return this
+    }
+
+    public fun draw_rect(x: int32, y: int32, w: int32, h: int32) -> CanvasWidget {
+        if w <= 0 || h <= 0 {
+            return this
+        }
+        set x2 = x + w - 1
+        set y2 = y + h - 1
+        this.draw_line(x, y, x2, y)
+        this.draw_line(x2, y, x2, y2)
+        this.draw_line(x2, y2, x, y2)
+        this.draw_line(x, y2, x, y)
+        return this
+    }
+
+    public fun draw_sparkline(values: float64[], min_v: float64 = 0.0, max_v: float64 = 0.0) -> CanvasWidget {
+        if values.len() < 2 || this.pixel_width() <= 0 || this.pixel_height() <= 0 {
+            return this
+        }
+        set pw = this.pixel_width()
+        set ph = this.pixel_height()
+
+        set actual_min = min_v
+        set actual_max = max_v
+        if actual_min == actual_max {
+            set idx_first: int64 = 0
+            rewrite actual_min = values[idx_first]
+            rewrite actual_max = values[idx_first]
+            for i in 1..values.len() {
+                set idx_loop: int64 = cast(i, "int64")
+                set v = values[idx_loop]
+                if v < actual_min { rewrite actual_min = v }
+                if v > actual_max { rewrite actual_max = v }
+            }
+        }
+        set range = actual_max - actual_min
+        if range <= 0.0 {
+            rewrite range = 1.0
+        }
+
+        set count = cast(values.len(), "int32")
+        set step_x = cast(pw - 1, "float64") / cast(count - 1, "float64")
+        set prev_px: int32 = 0
+        set idx_zero: int64 = 0
+        set val_zero = values[idx_zero]
+        set norm0 = (val_zero - actual_min) / range
+        set prev_py: int32 = ph - 1 - cast(norm0 * cast(ph - 1, "float64"), "int32")
+
+        for i in 1..count {
+            set cur_px: int32 = cast(cast(i, "float64") * step_x, "int32")
+            set idx_curr: int64 = cast(i, "int64")
+            set val_curr = values[idx_curr]
+            set norm = (val_curr - actual_min) / range
+            set cur_py: int32 = ph - 1 - cast(norm * cast(ph - 1, "float64"), "int32")
+            this.draw_line(prev_px, prev_py, cur_px, cur_py)
+            rewrite prev_px = cur_px
+            rewrite prev_py = cur_py
+        }
+        return this
+    }
+
+    public fun draw_barchart(values: float64[], max_v: float64 = 0.0) -> CanvasWidget {
+        if values.len() == 0 || this.pixel_width() <= 0 || this.pixel_height() <= 0 {
+            return this
+        }
+        set actual_max = max_v
+        if actual_max <= 0.0 {
+            for i in 0..values.len() {
+                set v = values[cast(i, "int64")]
+                if v > actual_max { rewrite actual_max = v }
+            }
+        }
+        if actual_max <= 0.0 {
+            rewrite actual_max = 1.0
+        }
+
+        set pw = this.pixel_width()
+        set ph = this.pixel_height()
+        set count = cast(values.len(), "int32")
+        set bar_w: int32 = pw / count
+        if bar_w < 1 {
+            rewrite bar_w = 1
+        }
+
+        for i in 0..count {
+            set val = values[cast(i, "int64")]
+            set norm = val / actual_max
+            if norm < 0.0 { rewrite norm = 0.0 }
+            if norm > 1.0 { rewrite norm = 1.0 }
+            set bar_h = cast(norm * cast(ph - 1, "float64"), "int32")
+            set start_x = cast(i, "int32") * bar_w
+            for bx in 0..bar_w {
+                set px = start_x + cast(bx, "int32")
+                if px < pw {
+                    for h_idx in 0..bar_h + 1 {
+                        set py = ph - 1 - cast(h_idx, "int32")
+                        this.set_pixel(px, py)
+                    }
+                }
+            }
+        }
+        return this
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32) {
+        for cy in 0..this.height {
+            for cx in 0..this.width {
+                set idx = cy * cast(this.width, "int64") + cx
+                set pattern = this.grid[idx]
+                if pattern != 0 {
+                    set ch = braille_to_char(pattern)
+                    buf.set_cell(x + cast(cx, "int32"), y + cast(cy, "int32"), init_cell(ch, this.fg, this.bg))
+                }
+            }
+        }
+    }
+}

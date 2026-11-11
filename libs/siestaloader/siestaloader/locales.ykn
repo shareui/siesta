@@ -1,0 +1,104 @@
+load core.panic: panic
+load std.strings: lines, trim, index_of
+
+public struct LocaleTranslation {
+    lang: string
+    text: string
+}
+
+public struct LocaleItem {
+    key: string
+    translations: LocaleTranslation[]
+}
+
+public class LocaleCatalog {
+    public keys: string[]
+    public langs: string[]
+    public texts: string[]
+
+    public fun init() {
+        set empty_keys: string[] = []
+        set empty_langs: string[] = []
+        set empty_texts: string[] = []
+        rewrite this.keys = empty_keys
+        rewrite this.langs = empty_langs
+        rewrite this.texts = empty_texts
+    }
+
+    public fun add_translation(key: string, lang: string, text: string) {
+        this.keys.push(key)
+        this.langs.push(lang)
+        this.texts.push(text)
+    }
+
+    public fun get_translation(key: string, lang: string) -> string? {
+        for i in 0..this.keys.len() {
+            if this.keys[i] == key && this.langs[i] == lang {
+                return this.texts[i]
+            }
+        }
+        return null
+    }
+
+    public fun has_key(key: string) -> bool {
+        for i in 0..this.keys.len() {
+            if this.keys[i] == key {
+                return true
+            }
+        }
+        return false
+    }
+
+    public fun has_translation(key: string, lang: string) -> bool {
+        return this.get_translation(key, lang) != null
+    }
+
+    public fun resolve_text(key: string, lang: string = "en") -> string {
+        set direct = this.get_translation(key, lang)
+        if direct != null {
+            return direct ?? key
+        }
+        if lang != "en" {
+            set en_fallback = this.get_translation(key, "en")
+            if en_fallback != null {
+                return en_fallback ?? key
+            }
+        }
+        return key
+    }
+}
+
+public fun parse_locales_toml(content: string) -> LocaleCatalog {
+    set catalog = init LocaleCatalog()
+    set all_lines = lines(content)
+    set current_section: string = ""
+
+    for i in 0..all_lines.len() {
+        set l = trim(all_lines[i])
+        if l.len() == 0 || l[0..1] == "#" {
+            continue
+        }
+        if l[0..1] == "[" && l[l.len() - 1..l.len()] == "]" {
+            rewrite current_section = trim(l[1..l.len() - 1])
+            continue
+        }
+        set eq_idx = index_of(l, "=")
+        if eq_idx != null && current_section.len() > 0 {
+            set idx = eq_idx ?? 0
+            if idx > 0 {
+                set lang = trim(l[0..idx])
+                set val_raw = trim(l[idx + 1..l.len()])
+                set val_clean: string = val_raw
+                if val_clean.len() >= 2 && val_clean[0..1] == "\"" && val_clean[val_clean.len() - 1..val_clean.len()] == "\"" {
+                    rewrite val_clean = val_clean[1..val_clean.len() - 1]
+                } elif val_clean.len() >= 2 && val_clean[0..1] == "'" && val_clean[val_clean.len() - 1..val_clean.len()] == "'" {
+                    rewrite val_clean = val_clean[1..val_clean.len() - 1]
+                }
+                catalog.keys.push(current_section)
+                catalog.langs.push(lang)
+                catalog.texts.push(val_clean)
+            }
+        }
+    }
+    return catalog
+}

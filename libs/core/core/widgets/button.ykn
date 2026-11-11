@@ -1,0 +1,116 @@
+#![lint::allow("unused_import")]
+
+load std.itermtool.key: KEY_ENTER, KEY_SPACE
+load ..buffer: TerminalBuffer
+
+public static BUTTON_ROLE_DEFAULT: string = "default"
+public static BUTTON_ROLE_PRIMARY: string = "primary"
+public static BUTTON_ROLE_SUCCESS: string = "success"
+public static BUTTON_ROLE_WARNING: string = "warning"
+public static BUTTON_ROLE_DANGER: string = "danger"
+
+public static BUTTON_STATE_NORMAL: int32 = 0
+public static BUTTON_STATE_HOVER: int32 = 1
+public static BUTTON_STATE_FOCUSED: int32 = 2
+public static BUTTON_STATE_PRESSED: int32 = 3
+public static BUTTON_STATE_DISABLED: int32 = 4
+
+public class ButtonWidget {
+    public id: string
+    public label: string
+    public role: string
+    public state: int32
+    public clicked: bool
+
+    public fun init(id: string, label: string, role: string = "default", disabled: bool = false) {
+        rewrite this.id = id
+        rewrite this.label = label
+        rewrite this.role = role
+        rewrite this.clicked = false
+        if disabled {
+            rewrite this.state = BUTTON_STATE_DISABLED
+        } else {
+            rewrite this.state = BUTTON_STATE_NORMAL
+        }
+    }
+
+    public fun is_disabled() -> bool {
+        return this.state == BUTTON_STATE_DISABLED
+    }
+
+    public fun is_focused() -> bool {
+        return this.state == BUTTON_STATE_FOCUSED
+    }
+
+    public fun set_focused(f: bool) {
+        if this.state == BUTTON_STATE_DISABLED {
+            return
+        }
+        if f {
+            rewrite this.state = BUTTON_STATE_FOCUSED
+        } else {
+            rewrite this.state = BUTTON_STATE_NORMAL
+        }
+    }
+
+    public fun click() -> bool {
+        if this.state == BUTTON_STATE_DISABLED {
+            return false
+        }
+        rewrite this.clicked = true
+        return true
+    }
+
+    public fun handle_key(code: int32) -> bool {
+        if this.state == BUTTON_STATE_DISABLED {
+            return false
+        }
+        if code == KEY_ENTER || code == 13 || code == 10 || code == KEY_SPACE || code == 32 {
+            return this.click()
+        }
+        return false
+    }
+
+    public fun formatted_label() -> string {
+        if this.state == BUTTON_STATE_FOCUSED {
+            return "> [ " + this.label + " ] <"
+        }
+        return "[ " + this.label + " ]"
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32) {
+        set text = this.formatted_label()
+        set fg = "default"
+        set bg = "default"
+        set bold = false
+        set dim = false
+        set reversed = false
+
+        if this.state == BUTTON_STATE_DISABLED {
+            rewrite dim = true
+        } else {
+            if this.state == BUTTON_STATE_FOCUSED {
+                rewrite bold = true
+                rewrite reversed = true
+            }
+        }
+
+        if this.role == BUTTON_ROLE_PRIMARY {
+            rewrite fg = "cyan"
+        } else {
+            if this.role == BUTTON_ROLE_DANGER {
+                rewrite fg = "red"
+            } else {
+                if this.role == BUTTON_ROLE_SUCCESS {
+                    rewrite fg = "green"
+                } else {
+                    if this.role == BUTTON_ROLE_WARNING {
+                        rewrite fg = "yellow"
+                    }
+                }
+            }
+        }
+
+        buf.draw_text(x, y, text, fg, bg, bold, dim, false, false, reversed)
+    }
+}

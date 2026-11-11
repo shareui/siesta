@@ -1,0 +1,73 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+load ..layout.rect: Rect
+
+public fun sparkline_symbol(level: int32) -> string {
+    if level >= 8 { return "█" }
+    if level == 7 { return "▇" }
+    if level == 6 { return "▆" }
+    if level == 5 { return "▅" }
+    if level == 4 { return "▄" }
+    if level == 3 { return "▃" }
+    if level == 2 { return "▂" }
+    if level == 1 { return " " }
+    return " "
+}
+
+public class SparklineWidget {
+    public data: int32[]
+    public max_value: int32
+    public fg: string
+    public bg: string
+
+    public fun init(data: int32[] = [], max_value: int32 = 0, fg: string = "green", bg: string = "default") {
+        rewrite this.data = data
+        rewrite this.max_value = max_value
+        rewrite this.fg = fg
+        rewrite this.bg = bg
+    }
+
+    public fun set_data(d: int32[]) {
+        rewrite this.data = d
+    }
+
+    public fun render(ref buf: TerminalBuffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 || this.data.len() == 0 {
+            return
+        }
+
+        set eff_max = this.max_value
+        if eff_max <= 0 {
+            for i in 0..this.data.len() {
+                if this.data[i] > eff_max {
+                    rewrite eff_max = this.data[i]
+                }
+            }
+        }
+        if eff_max <= 0 {
+            rewrite eff_max = 1
+        }
+
+        set count = cast(this.data.len(), "int32")
+        set start_idx: int32 = 0
+        if count > area.width {
+            rewrite start_idx = count - area.width
+        }
+
+        set cy = area.y + area.height - 1
+        for col in 0..area.width {
+            set data_idx = start_idx + cast(col, "int32")
+            if data_idx >= count {
+                break
+            }
+            set val = this.data[cast(data_idx, "int64")]
+            if val < 0 { rewrite val = 0 }
+            set level = (val * 8) / eff_max
+            if level > 8 { rewrite level = 8 }
+            set sym = sparkline_symbol(level)
+            buf.draw_text(area.x + cast(col, "int32"), cy, sym, this.fg, this.bg, false, false, false, false, false)
+        }
+    }
+}

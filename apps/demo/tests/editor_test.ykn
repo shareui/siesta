@@ -1,0 +1,170 @@
+#![lint::allow("unused_import")]
+
+load core.utils: assert
+load root.tree: FileTree, FileEntry
+load root.editor: DemoScreen, MODE_NORMAL, MODE_INSERT, ActionPrompt
+load siesta: TerminalBuffer, Screen, SiestaApp
+load std.io: println
+load std.itermtool.key: KeyEvent, KEY_CHAR, KEY_TAB, KEY_ESC
+load std.itermtool.mouse: MouseEvent, MOUSE_DOWN, MOUSE_DRAG, MOUSE_UP
+
+#[test]
+fun test_file_tree_loading() {
+    set tree = init FileTree(".")
+    assert(tree.entries.len() > 0)
+
+    set has_dir: bool = false
+    set has_file: bool = false
+    for i in 0..tree.entries.len() {
+        set e = tree.entries[i]
+        if e.is_dir {
+            rewrite has_dir = true
+            assert(e.name.len() > 0)
+            assert(e.name[e.name.len() - 1..e.name.len()] == "/")
+        } else {
+            rewrite has_file = true
+        }
+    }
+    assert(has_dir)
+    assert(has_file)
+}
+
+#[test]
+fun test_editor_screen_lifecycle() {
+    set screen = init DemoScreen(".")
+    assert(screen.mode == MODE_NORMAL)
+    assert(screen.tree_width == 26)
+
+    // test tab key focus switching
+    set tab_key = init KeyEvent(KEY_TAB, "")
+    set handled_tab = screen.handle_key(tab_key)
+    assert(handled_tab)
+    assert(screen.focus_editor)
+
+    // test mode switch to insert
+    set i_key = init KeyEvent(KEY_CHAR, "i")
+    set handled_i = screen.handle_key(i_key)
+    assert(handled_i)
+    assert(screen.mode == MODE_INSERT)
+
+    // test esc back to normal
+    set esc_key = init KeyEvent(KEY_ESC, "")
+    set handled_esc = screen.handle_key(esc_key)
+    assert(handled_esc)
+    assert(screen.mode == MODE_NORMAL)
+
+    // test mouse separator resize
+    set m_down = init MouseEvent(MOUSE_DOWN, 0, 26, 5)
+    set handled_down = screen.handle_mouse(m_down)
+    assert(handled_down)
+    assert(screen.is_resizing_tree)
+
+    set m_drag = init MouseEvent(MOUSE_DRAG, 0, 35, 5)
+    set handled_drag = screen.handle_mouse(m_drag)
+    assert(handled_drag)
+    assert(screen.tree_width == 35)
+
+    set m_up = init MouseEvent(MOUSE_UP, 0, 35, 5)
+    set handled_up = screen.handle_mouse(m_up)
+    assert(handled_up)
+    assert(!screen.is_resizing_tree)
+
+    // test direct buffer draw
+    set buf = init TerminalBuffer(80, 24)
+    screen.draw(ref buf)
+    assert(buf.get_cell(1, 0).ch == "S")
+    assert(buf.get_cell(1, 0).bg == "#89b4fa")
+    assert(buf.get_cell(50, 10).bg == "#1e1e2e")
+
+    // test double buffer diff rendering
+    set app = init SiestaApp(80, 24)
+    app.double_buf.back_buffer.clear()
+    screen.draw(ref app.double_buf.back_buffer)
+    set flushed = app.double_buf.diff_and_flush()
+    assert(flushed > 0)
+}
+
+#[test]
+fun test_controls_dialog_shortcut_and_closing() {
+    println("step 0: init")
+    set screen = init DemoScreen(".")
+    assert(!screen.show_controls)
+
+    println("step 1: open with ctrl+\\")
+    set ctrl_bs_key = init KeyEvent(KEY_CHAR, "\\", true)
+    set handled_bs = screen.handle_key(ctrl_bs_key)
+    assert(handled_bs)
+    assert(screen.show_controls)
+
+    println("step 2: draw")
+    set buf = init TerminalBuffer(80, 24)
+    screen.draw(ref buf)
+    assert(buf.get_cell(1, 0).ch == "S")
+    println("step 2.1: cell 9,4 is '" + buf.get_cell(9, 4).ch + "'")
+    set r4: string = ""
+    for col in 0..buf.width {
+        rewrite r4 = r4 + buf.get_cell(cast(col, "int32"), 4).ch
+    }
+    println("row 4: [" + r4 + "]")
+    assert(buf.get_cell(9, 4).ch == "Г")
+
+    println("step 3: close with q")
+    set q_key = init KeyEvent(KEY_CHAR, "q")
+    set handled_q = screen.handle_key(q_key)
+    println("step 3.1: handled_q = " + cast(handled_q, "string") + ", show_controls = " + cast(screen.show_controls, "string"))
+    assert(handled_q)
+    assert(!screen.show_controls)
+
+    println("step 4: raw28")
+    set ctrl_bs_raw = init KeyEvent(28, "")
+    set handled_raw28 = screen.handle_key(ctrl_bs_raw)
+    assert(handled_raw28)
+    assert(screen.show_controls)
+
+    println("step 5: esc")
+    set esc_key = init KeyEvent(KEY_ESC, "")
+    set handled_esc = screen.handle_key(esc_key)
+    assert(handled_esc)
+    assert(!screen.show_controls)
+
+    // Ctrl+7 opens controls dialog (fallback)
+    set ctrl7_key = init KeyEvent(KEY_CHAR, "7", true)
+    set handled_ctrl7 = screen.handle_key(ctrl7_key)
+    assert(handled_ctrl7)
+    assert(screen.show_controls)
+
+    // raw key code 31 (US) also opens controls dialog
+    set _ = screen.handle_key(init KeyEvent(KEY_CHAR, "q"))
+    assert(!screen.show_controls)
+    set ctrl7_raw = init KeyEvent(31, "")
+    set handled_raw31 = screen.handle_key(ctrl7_raw)
+    assert(handled_raw31)
+    assert(screen.show_controls)
+}
+
+#[test]
+fun test_spes_component_two_way_binding_and_callback() {
+    set flag: bool[] = [false]
+    set on_act = fun() => {
+        rewrite flag[0] = true
+    }
+    set prompt = init ActionPrompt("Save Project", on_act)
+    assert(prompt.get_label() == "Save Project")
+
+    prompt.set_label("Discard Changes")
+    assert(prompt.get_label() == "Discard Changes")
+
+    prompt.update_state("label", "New Label")
+    assert(prompt.get_label() == "New Label")
+
+    prompt.trigger_onAction()
+    assert(flag[0])
+
+    rewrite flag[0] = false
+    prompt.trigger_event("onClick")
+    assert(flag[0])
+
+    rewrite flag[0] = false
+    prompt.click_widget("okBtn")
+    assert(flag[0])
+}

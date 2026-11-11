@@ -1,0 +1,106 @@
+extern editor-res
+
+theme editorTheme {
+  bg: #1e1e2e
+  fg: #cdd6f4
+  sidebarBg: #181825
+  sidebarFg: #a6adc8
+  sidebarDirFg: #89b4fa
+  sidebarActiveBg: #313244
+  sidebarActiveFg: #ffffff
+  headerBg: #11111b
+  headerFg: #cdd6f4
+  headerTitleBg: #89b4fa
+  headerTitleFg: #11111b
+  statusBg: #11111b
+  statusFg: #bac2de
+  normalModeBg: #a6e3a1
+  normalModeFg: #11111b
+  insertModeBg: #f9e2af
+  insertModeFg: #11111b
+  separatorColor: #45475a
+  separatorActiveColor: #f9e2af
+  lineNumFg: #585b70
+  cursorBg: #f5e0dc
+  cursorFg: #11111b
+  dialogBg: #181825
+  dialogFg: #cdd6f4
+  dialogBorder: #89b4fa
+  dialogHeaderBg: #89b4fa
+  dialogHeaderFg: #11111b
+  dialogKeyFg: #f9e2af
+  dialogDescFg: #bac2de
+  accent: #89b4fa
+  dimText: #585b70
+}
+
+component headerBar(title: string = "SIESTA DEMO", path: string = "") {
+  row {
+    text(tr"editor.title")
+  }
+}
+
+component fileTreePane(currentDir: string = ".") {
+  col {
+    text("File Tree")
+  }
+}
+
+component editorPane(fileName: string = "") {
+  col {
+    text(tr"editor.title")
+  }
+}
+
+component statusBar(modeName: string = "NORMAL", statusText: string = "", cursorPosition: string = "") {
+  row {
+    text(tr"editor.mode_normal")
+  }
+}
+
+component actionPrompt(label: string, onAction: fun()) {
+  row {
+    text(bind: label)
+    button("OK", onClick: onAction) {
+      id: okBtn
+    }
+  }
+}
+
+dialog controlsDialog(title: string = "Горячие клавиши и управление") {
+  modal: true
+  dimBackdrop: true
+  width: 68
+  height: 16
+  shortcuts {
+    "Esc": onClose
+    "q": onClose
+  }
+  col {
+    text(tr"controls.nav_header")
+    text(tr"controls.nav_keys")
+    text(tr"controls.mode_header")
+    text(tr"controls.mode_keys")
+    text(tr"controls.tree_header")
+    text(tr"controls.tree_keys")
+    text(tr"controls.edit_header")
+    text(tr"controls.edit_keys")
+    text(tr"controls.file_header")
+    text(tr"controls.file_keys")
+    divider
+    text(tr"controls.close_hint")
+  }
+}
+
+dialog confirmQuitDialog(title: string = "Confirm Exit") {
+  modal: true
+  col {
+    text(tr"dialog.unsaved")
+  }
+}
+
+screen editorScreen {
+  col {
+    text(tr"editor.title")
+  }
+}

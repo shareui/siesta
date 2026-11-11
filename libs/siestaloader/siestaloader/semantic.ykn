@@ -1,0 +1,103 @@
+load .ast: SpesModule, WidgetNode
+load .locales: LocaleCatalog
+load .typecheck: validate_widget_tree
+
+public class SemanticResult {
+    warnings: string[]
+
+    public fun init() {
+        set empty_w: string[] = []
+        rewrite this.warnings = empty_w
+    }
+
+    public fun add_warning(msg: string) {
+        set old_w = this.warnings
+        set new_w: string[] = []
+        for i in 0..old_w.len() {
+            new_w.push(old_w[i])
+        }
+        new_w.push(msg)
+        rewrite this.warnings = new_w
+    }
+}
+
+public class SemanticAnalyzer {
+    default_locale: string
+    catalog: LocaleCatalog?
+    known_langs: string[]
+
+    public fun init(default_locale: string = "ru", catalog: LocaleCatalog? = null, known_langs: string[] = []) {
+        rewrite this.default_locale = default_locale
+        rewrite this.catalog = catalog
+        rewrite this.known_langs = known_langs
+    }
+
+    public fun validate_module(m: SpesModule) -> SemanticResult {
+        set res = init SemanticResult()
+        for i in 0..m.components.len() {
+            for j in 0..m.components[i].root_widgets.len() {
+                set w = m.components[i].root_widgets[j]
+                validate_widget_tree(ref w)
+                this.scan_locales(ref w, ref res)
+            }
+        }
+        for i in 0..m.dialogs.len() {
+            for j in 0..m.dialogs[i].root_widgets.len() {
+                set w = m.dialogs[i].root_widgets[j]
+                validate_widget_tree(ref w)
+                this.scan_locales(ref w, ref res)
+            }
+        }
+        for i in 0..m.screens.len() {
+            for j in 0..m.screens[i].root_widgets.len() {
+                set w = m.screens[i].root_widgets[j]
+                validate_widget_tree(ref w)
+                this.scan_locales(ref w, ref res)
+            }
+        }
+        return res
+    }
+
+    fun scan_locales(ref node: WidgetNode, ref res: SemanticResult) {
+        if node.pos_arg.len() >= 4 && node.pos_arg[0..3] == "tr\"" {
+            set key = this.extract_tr_key(node.pos_arg)
+            this.check_key(key, ref res)
+        }
+        for i in 0..node.props.len() {
+            set prop_val = node.props[i].val
+            if prop_val.len() >= 4 && prop_val[0..3] == "tr\"" {
+                set key = this.extract_tr_key(prop_val)
+                this.check_key(key, ref res)
+            }
+        }
+        for i in 0..node.children.len() {
+            set child_node = node.children[i]
+            this.scan_locales(ref child_node, ref res)
+        }
+    }
+
+    fun extract_tr_key(s: string) -> string {
+        if s.len() >= 4 && s[0..3] == "tr\"" && s[s.len() - 1..s.len()] == "\"" {
+            return s[3..s.len() - 1]
+        }
+        return s
+    }
+
+    fun check_key(key: string, ref res: SemanticResult) {
+        if this.catalog == null {
+            return
+        }
+        set has: bool = (this.catalog?.has_key(key) ?? false)
+        if !has {
+            res.add_warning("siesta warning: missing translation for key '" + key + "' in all locales (fallback to raw key)")
+            return
+        }
+        for i in 0..this.known_langs.len() {
+            set lang = this.known_langs[i]
+            set has_tr: bool = (this.catalog?.has_translation(key, lang) ?? false)
+            if !has_tr {
+                res.add_warning("siesta warning: missing translation for key '" + key + "' in locale '" + lang + "' (fallback to default '" + this.default_locale + "')")
+            }
+        }
+    }
+}

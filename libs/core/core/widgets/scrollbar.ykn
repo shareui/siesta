@@ -1,0 +1,96 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+load ..layout.rect: Rect
+
+public class ScrollbarWidget {
+    public content_len: int32
+    public viewport_len: int32
+    public scroll_pos: int32
+    public show_arrows: bool
+    public thumb_fg: string
+    public track_fg: string
+    public bg: string
+
+    public fun init(
+        content_len: int32 = 0,
+        viewport_len: int32 = 0,
+        scroll_pos: int32 = 0,
+        show_arrows: bool = true,
+        thumb_fg: string = "cyan",
+        track_fg: string = "gray",
+        bg: string = "default"
+    ) {
+        rewrite this.content_len = content_len
+        rewrite this.viewport_len = viewport_len
+        rewrite this.scroll_pos = scroll_pos
+        rewrite this.show_arrows = show_arrows
+        rewrite this.thumb_fg = thumb_fg
+        rewrite this.track_fg = track_fg
+        rewrite this.bg = bg
+    }
+
+    public fun set_state(content_len: int32, viewport_len: int32, scroll_pos: int32) {
+        rewrite this.content_len = content_len
+        rewrite this.viewport_len = viewport_len
+        rewrite this.scroll_pos = scroll_pos
+    }
+
+    public fun render(ref buf: TerminalBuffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return
+        }
+
+        set x = area.x
+        set h = area.height
+
+        set start_row: int32 = 0
+        set end_row: int32 = h
+
+        if this.show_arrows && h >= 3 {
+            buf.draw_text(x, area.y, "▲", this.thumb_fg, this.bg, false, false, false, false, false)
+            buf.draw_text(x, area.y + h - 1, "▼", this.thumb_fg, this.bg, false, false, false, false, false)
+            rewrite start_row = 1
+            rewrite end_row = h - 1
+        }
+
+        set track_h = end_row - start_row
+        if track_h <= 0 {
+            return
+        }
+
+        // if content fits entirely, just draw track
+        if this.content_len <= this.viewport_len || this.content_len <= 0 {
+            for r in 0..track_h {
+                buf.draw_text(x, area.y + start_row + cast(r, "int32"), "│", this.track_fg, this.bg, false, false, false, false, false)
+            }
+            return
+        }
+
+        // compute thumb size & pos
+        set thumb_sz = (this.viewport_len * track_h) / this.content_len
+        if thumb_sz < 1 { rewrite thumb_sz = 1 }
+        if thumb_sz > track_h { rewrite thumb_sz = track_h }
+
+        set max_scroll = this.content_len - this.viewport_len
+        set cur_scroll = this.scroll_pos
+        if cur_scroll < 0 { rewrite cur_scroll = 0 }
+        if cur_scroll > max_scroll { rewrite cur_scroll = max_scroll }
+
+        set max_track_offset = track_h - thumb_sz
+        set thumb_offset: int32 = if max_scroll > 0 { (cur_scroll * max_track_offset) / max_scroll } else { cast(0, "int32") }
+        set thumb_start = start_row + thumb_offset
+        set thumb_end = thumb_start + thumb_sz
+
+        for r in 0..track_h {
+            set ri = start_row + cast(r, "int32")
+            set cy = area.y + ri
+            if ri >= thumb_start && ri < thumb_end {
+                buf.draw_text(x, cy, "█", this.thumb_fg, this.bg, false, false, false, false, false)
+            } else {
+                buf.draw_text(x, cy, "│", this.track_fg, this.bg, false, false, false, false, false)
+            }
+        }
+    }
+}

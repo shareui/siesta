@@ -1,0 +1,200 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.itermtool.key: KEY_TAB
+load ..layout.rect: Rect, rect_contains
+load ..buffer: TerminalBuffer
+
+public class ModalEntry {
+    public id: string
+    public bounds: Rect
+    public dim_backdrop: bool
+    public close_on_backdrop: bool
+    public focus_ids: string[]
+    public focused_index: int32
+
+    public fun init(id: string, bounds: Rect, dim_backdrop: bool = true, close_on_backdrop: bool = false) {
+        set empty_focus: string[] = []
+        rewrite this.id = id
+        rewrite this.bounds = bounds
+        rewrite this.dim_backdrop = dim_backdrop
+        rewrite this.close_on_backdrop = close_on_backdrop
+        rewrite this.focus_ids = empty_focus
+        rewrite this.focused_index = -1
+    }
+
+    public fun register_focus_id(id: string) -> ModalEntry {
+        for i in 0..this.focus_ids.len() {
+            if this.focus_ids[i] == id {
+                return this
+            }
+        }
+        this.focus_ids.push(id)
+        return this
+    }
+
+    public fun get_focused_id() -> string {
+        set total = cast(this.focus_ids.len(), "int32")
+        if this.focused_index >= 0 && this.focused_index < total {
+            return this.focus_ids[this.focused_index]
+        }
+        return ""
+    }
+
+    public fun next_focus() -> string {
+        if this.focus_ids.len() == 0 {
+            return ""
+        }
+        set total = cast(this.focus_ids.len(), "int32")
+        set next_idx: int32 = 0
+        if this.focused_index >= 0 {
+            rewrite next_idx = (this.focused_index + 1) % total
+        }
+        rewrite this.focused_index = next_idx
+        return this.focus_ids[this.focused_index]
+    }
+
+    public fun prev_focus() -> string {
+        if this.focus_ids.len() == 0 {
+            return ""
+        }
+        set total = cast(this.focus_ids.len(), "int32")
+        set prev_idx: int32 = total - 1
+        if this.focused_index > 0 {
+            rewrite prev_idx = this.focused_index - 1
+        }
+        rewrite this.focused_index = prev_idx
+        return this.focus_ids[this.focused_index]
+    }
+
+    public fun handle_key(code: int32, shift: bool) -> bool {
+        if code == KEY_TAB {
+            if shift {
+                this.prev_focus()
+            } else {
+                this.next_focus()
+            }
+            return true
+        }
+        return false
+    }
+}
+
+public class ModalManager {
+    public stack: ModalEntry[]
+
+    public fun init() {
+        set empty_stack: ModalEntry[] = []
+        rewrite this.stack = empty_stack
+    }
+
+    public fun has_active_modal() -> bool {
+        return this.stack.len() > 0
+    }
+
+    public fun count() -> int32 {
+        return cast(this.stack.len(), "int32")
+    }
+
+    public fun get_top() -> ModalEntry? {
+        if this.stack.len() == 0 {
+            return null
+        }
+        return this.stack[this.stack.len() - 1]
+    }
+
+    public fun get_top_focused_id() -> string {
+        if this.stack.len() == 0 {
+            return ""
+        }
+        set top = this.stack[this.stack.len() - 1]
+        return top.get_focused_id()
+    }
+
+    public fun push(modal: ModalEntry) {
+        this.stack.push(modal)
+    }
+
+    public fun pop() -> ModalEntry? {
+        if this.stack.len() == 0 {
+            return null
+        }
+        return this.stack.pop()
+    }
+
+    public fun dismiss(id: string) -> bool {
+        set found_index: int32 = -1
+        for i in 0..this.stack.len() {
+            if this.stack[i].id == id {
+                rewrite found_index = cast(i, "int32")
+            }
+        }
+        if found_index < 0 {
+            return false
+        }
+        for i in cast(found_index, "int64")..this.stack.len() - 1 {
+            rewrite this.stack[i] = this.stack[i + 1]
+        }
+        this.stack.pop()
+        return true
+    }
+
+    public fun should_dim_backdrop() -> bool {
+        if this.stack.len() == 0 {
+            return false
+        }
+        set top = this.stack[this.stack.len() - 1]
+        return top.dim_backdrop
+    }
+
+    public fun is_point_inside_top_modal(x: int32, y: int32) -> bool {
+        if this.stack.len() == 0 {
+            return false
+        }
+        set top = this.stack[this.stack.len() - 1]
+        return rect_contains(top.bounds, x, y)
+    }
+
+    public fun intercept_key(code: int32, shift: bool) -> bool {
+        if this.stack.len() == 0 {
+            return false
+        }
+        set top = this.stack[this.stack.len() - 1]
+        return top.handle_key(code, shift)
+    }
+
+    public fun intercept_mouse(x: int32, y: int32) -> bool {
+        if this.stack.len() == 0 {
+            return false
+        }
+        set top = this.stack[this.stack.len() - 1]
+        if !rect_contains(top.bounds, x, y) {
+            if top.close_on_backdrop {
+                this.pop()
+            }
+            return true
+        }
+        return false
+    }
+
+    public fun dim_backdrop_cells(ref buf: TerminalBuffer) {
+        if this.stack.len() == 0 {
+            return
+        }
+        set top = this.stack[this.stack.len() - 1]
+        if !top.dim_backdrop {
+            return
+        }
+        for row in 0..buf.height {
+            set cur_y = cast(row, "int32")
+            for col in 0..buf.width {
+                set cur_x = cast(col, "int32")
+                if !rect_contains(top.bounds, cur_x, cur_y) {
+                    set cell = buf.get_cell(cur_x, cur_y)
+                    rewrite cell.dim = true
+                    buf.set_cell(cur_x, cur_y, cell)
+                }
+            }
+        }
+    }
+}

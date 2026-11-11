@@ -1,0 +1,126 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.strings: lines
+load ..buffer: TerminalBuffer
+load ..layout.rect: Rect
+load .text: wrap_chars, wrap_words
+
+public static WRAP_NONE: int32 = 0
+public static WRAP_CHAR: int32 = 1
+public static WRAP_WORD: int32 = 2
+
+public static ALIGN_LEFT: int32 = 0
+public static ALIGN_CENTER: int32 = 1
+public static ALIGN_RIGHT: int32 = 2
+
+public class ParagraphWidget {
+    public raw_text: string
+    public wrap_mode: int32
+    public alignment: int32
+    public scroll_x: int32
+    public scroll_y: int32
+    public fg: string
+    public bg: string
+    public bold: bool
+
+    public fun init(
+        text: string = "",
+        wrap_mode: int32 = 0,
+        alignment: int32 = 0,
+        scroll_x: int32 = 0,
+        scroll_y: int32 = 0,
+        fg: string = "default",
+        bg: string = "default",
+        bold: bool = false
+    ) {
+        rewrite this.raw_text = text
+        rewrite this.wrap_mode = wrap_mode
+        rewrite this.alignment = alignment
+        rewrite this.scroll_x = scroll_x
+        rewrite this.scroll_y = scroll_y
+        rewrite this.fg = fg
+        rewrite this.bg = bg
+        rewrite this.bold = bold
+    }
+
+    public fun set_text(text: string) {
+        rewrite this.raw_text = text
+    }
+
+    public fun render(ref buf: TerminalBuffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return
+        }
+
+        set raw_lines_slice = lines(this.raw_text)
+        set raw_lines: string[] = []
+        for ri in 0..raw_lines_slice.len() {
+            raw_lines.push(raw_lines_slice[ri])
+        }
+        set formatted_lines: string[] = []
+
+        if this.wrap_mode == WRAP_CHAR {
+            for i in 0..raw_lines.len() {
+                set wrapped = wrap_chars(raw_lines[i], area.width)
+                for j in 0..wrapped.len() {
+                    formatted_lines.push(wrapped[j])
+                }
+            }
+        } elif this.wrap_mode == WRAP_WORD {
+            for i in 0..raw_lines.len() {
+                set wrapped = wrap_words(raw_lines[i], area.width)
+                for j in 0..wrapped.len() {
+                    formatted_lines.push(wrapped[j])
+                }
+            }
+        } else {
+            for i in 0..raw_lines.len() {
+                formatted_lines.push(raw_lines[i])
+            }
+        }
+
+        set total_lines = cast(formatted_lines.len(), "int32")
+        set start_line = this.scroll_y
+        if start_line < 0 {
+            rewrite start_line = 0
+        }
+
+        for row in 0..area.height {
+            set line_idx = start_line + cast(row, "int32")
+            if line_idx >= total_lines {
+                break
+            }
+            set line = formatted_lines[cast(line_idx, "int64")]
+            set line_len = cast(line.len(), "int32")
+
+            set draw_x = area.x
+            if this.alignment == ALIGN_CENTER {
+                if line_len < area.width {
+                    rewrite draw_x = area.x + (area.width - line_len) / 2
+                }
+            } elif this.alignment == ALIGN_RIGHT {
+                if line_len < area.width {
+                    rewrite draw_x = area.x + area.width - line_len
+                }
+            }
+
+            // handle scroll_x
+            if this.scroll_x > 0 {
+                if this.scroll_x < line_len {
+                    set visible = line[cast(this.scroll_x, "int64")..line.len()]
+                    if visible.len() > cast(area.width, "int64") {
+                        rewrite visible = visible[0..cast(area.width, "int64")]
+                    }
+                    buf.draw_text(area.x, area.y + cast(row, "int32"), visible, this.fg, this.bg, this.bold, false, false, false, false)
+                }
+            } else {
+                set visible = line
+                if line_len > area.width {
+                    rewrite visible = line[0..cast(area.width, "int64")]
+                }
+                buf.draw_text(draw_x, area.y + cast(row, "int32"), visible, this.fg, this.bg, this.bold, false, false, false, false)
+            }
+        }
+    }
+}

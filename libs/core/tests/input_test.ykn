@@ -1,0 +1,259 @@
+#![lint::allow("unused_import")]
+
+load core.utils: assert
+load root.input.focus: FocusNode, FocusManager, FOCUS_STATE_NORMAL, FOCUS_STATE_FOCUSED, FOCUS_STATE_DISABLED
+load root.input.mouse: MouseTarget, MouseDispatchResult, MouseRouter, is_point_inside
+load root.input.mouse: MOUSE_DOWN, MOUSE_UP, MOUSE_DRAG, MOUSE_MOVE, MOUSE_SCROLL_UP, MOUSE_SCROLL_DOWN
+load root.input.modal: ModalEntry, ModalManager
+load root.layout.rect: init_rect
+load root.buffer: TerminalBuffer
+load std.itermtool.key: KeyEvent, KEY_TAB, KEY_ENTER
+load std.io: println
+
+#[test]
+fun test_focus_ring_navigation() {
+    set fm = init FocusManager()
+    fm.register(init FocusNode("input_1", 1))
+    fm.register(init FocusNode("input_2", 2))
+    fm.register(init FocusNode("btn_submit", 3))
+
+    assert(fm.get_focused_id() == "")
+
+    // first tab
+    set f1 = fm.next()
+    assert(f1 == "input_1")
+    assert(fm.get_focused_id() == "input_1")
+    assert(fm.get_state("input_1") == FOCUS_STATE_FOCUSED)
+    assert(fm.get_state("input_2") == FOCUS_STATE_NORMAL)
+
+    // second tab
+    set f2 = fm.next()
+    assert(f2 == "input_2")
+
+    // third tab
+    set f3 = fm.next()
+    assert(f3 == "btn_submit")
+
+    // wrap around
+    set f4 = fm.next()
+    assert(f4 == "input_1")
+
+    // prev wraps backward
+    set p1 = fm.prev()
+    assert(p1 == "btn_submit")
+
+    fm.clear_focus()
+    assert(fm.get_focused_id() == "")
+    assert(fm.get_state("btn_submit") == FOCUS_STATE_NORMAL)
+}
+
+#[test]
+fun test_focus_disabled_skipping() {
+    set fm = init FocusManager()
+    fm.register(init FocusNode("field_a", 1, false))
+    fm.register(init FocusNode("field_b", 2, true))
+    fm.register(init FocusNode("field_c", 3, false))
+
+    assert(fm.get_state("field_b") == FOCUS_STATE_DISABLED)
+
+    // cannot directly focus disabled element
+    set ok_disabled = fm.set_focus("field_b")
+    assert(!ok_disabled)
+
+    // manual focus on field_a
+    set ok_a = fm.set_focus("field_a")
+    assert(ok_a)
+    assert(fm.get_focused_id() == "field_a")
+
+    // next should skip field_b and land on field_c
+    set next_id = fm.next()
+    assert(next_id == "field_c")
+
+    // next wraps back to field_a
+    set wrap_id = fm.next()
+    assert(wrap_id == "field_a")
+}
+
+#[test]
+fun test_focus_handle_tab_key() {
+    set fm = init FocusManager()
+    fm.register(init FocusNode("node_1", 1))
+    fm.register(init FocusNode("node_2", 2))
+
+    // tab key forward
+    set handled_tab = fm.handle_key(KEY_TAB, false)
+    assert(handled_tab)
+    assert(fm.get_focused_id() == "node_1")
+
+    // shift-tab key backward
+    set handled_shift_tab = fm.handle_key(KEY_TAB, true)
+    assert(handled_shift_tab)
+    assert(fm.get_focused_id() == "node_2")
+
+    // unrelated key is not handled
+    set handled_other = fm.handle_key(99, false)
+    assert(!handled_other)
+}
+
+#[test]
+fun test_mouse_hitbox_and_z_index() {
+    set router = init MouseRouter()
+    set r1 = init_rect(0, 0, 10, 10)
+    set r2 = init_rect(5, 5, 10, 10)
+
+    router.register_target(init MouseTarget("panel_bg", r1, 0))
+    router.register_target(init MouseTarget("card_fg", r2, 5))
+
+    // point outside both
+    set id_none = router.find_target_id_at(20, 20)
+    assert(id_none == "")
+
+    // point only in r1
+    set id_r1 = router.find_target_id_at(2, 2)
+    assert(id_r1 == "panel_bg")
+
+    // point in overlapping region selects higher z-index
+    set id_overlap = router.find_target_id_at(7, 7)
+    assert(id_overlap == "card_fg")
+}
+
+#[test]
+fun test_mouse_drag_lifecycle() {
+    set router = init MouseRouter()
+    set r = init_rect(10, 10, 20, 5)
+    router.register_target(init MouseTarget("slider", r))
+
+    // mouse down
+    set res_down = router.dispatch_raw(MOUSE_DOWN, 0, 12, 12)
+    assert(res_down.handled)
+    assert(res_down.target_id == "slider")
+    assert(router.active_target_id == "slider")
+    assert(!router.is_dragging)
+
+    // drag move
+    set res_move = router.dispatch_raw(MOUSE_MOVE, 0, 16, 12)
+    assert(res_move.handled)
+    assert(res_move.target_id == "slider")
+    assert(res_move.action == MOUSE_DRAG)
+    assert(router.is_dragging)
+
+    // mouse up
+    set res_up = router.dispatch_raw(MOUSE_UP, 0, 16, 12)
+    assert(res_up.handled)
+    assert(res_up.target_id == "slider")
+    assert(router.active_target_id == "")
+    assert(!router.is_dragging)
+}
+
+#[test]
+fun test_mouse_scroll_dispatch() {
+    set router = init MouseRouter()
+    set r = init_rect(0, 0, 30, 20)
+    router.register_target(init MouseTarget("scroll_view", r))
+
+    set res_up = router.dispatch_raw(MOUSE_SCROLL_UP, 0, 5, 5)
+    assert(res_up.handled)
+    assert(res_up.target_id == "scroll_view")
+    assert(res_up.action == MOUSE_SCROLL_UP)
+
+    set res_down = router.dispatch_raw(MOUSE_SCROLL_DOWN, 0, 5, 5)
+    assert(res_down.handled)
+    assert(res_down.target_id == "scroll_view")
+    assert(res_down.action == MOUSE_SCROLL_DOWN)
+}
+
+#[test]
+fun test_modal_manager_stack_and_backdrop() {
+    set mm = init ModalManager()
+    assert(!mm.has_active_modal())
+    assert(mm.count() == 0)
+
+    set modal_bounds = init_rect(10, 5, 20, 10)
+    set modal = init ModalEntry("confirm_dialog", modal_bounds, true)
+    mm.push(modal)
+
+    assert(mm.has_active_modal())
+    assert(mm.count() == 1)
+    assert(mm.should_dim_backdrop())
+
+    // inside check
+    assert(mm.is_point_inside_top_modal(15, 8))
+    assert(!mm.is_point_inside_top_modal(2, 2))
+
+    // mouse interception on backdrop
+    set trapped_backdrop = mm.intercept_mouse(2, 2)
+    assert(trapped_backdrop)
+
+    set allowed_inside = mm.intercept_mouse(15, 8)
+    assert(!allowed_inside)
+
+    // backdrop dimming
+    set buf = init TerminalBuffer(40, 20)
+    buf.draw_text(2, 2, "Backdrop text")
+    buf.draw_text(12, 7, "Inside modal text")
+
+    mm.dim_backdrop_cells(ref buf)
+
+    // cell outside modal was dimmed
+    set cell_outside = buf.get_cell(2, 2)
+    assert(cell_outside.dim)
+
+    // cell inside modal was not dimmed
+    set cell_inside = buf.get_cell(12, 7)
+    assert(!cell_inside.dim)
+
+    // dismiss
+    set dismissed = mm.dismiss("confirm_dialog")
+    assert(dismissed)
+    assert(!mm.has_active_modal())
+}
+
+#[test]
+fun test_modal_focus_trap() {
+    set mm = init ModalManager()
+    set modal_bounds = init_rect(5, 5, 30, 10)
+    set modal = init ModalEntry("input_dialog", modal_bounds, true, false)
+    modal.register_focus_id("dlg_input")
+    modal.register_focus_id("dlg_ok")
+    mm.push(modal)
+
+    // key intercepted and routed to modal's focus ring
+    set handled_1 = mm.intercept_key(KEY_TAB, false)
+    assert(handled_1)
+    assert(mm.get_top_focused_id() == "dlg_input")
+
+    set handled_2 = mm.intercept_key(KEY_TAB, false)
+    assert(handled_2)
+    assert(mm.get_top_focused_id() == "dlg_ok")
+
+    // wraps back inside modal
+    set handled_wrap = mm.intercept_key(KEY_TAB, false)
+    assert(handled_wrap)
+    assert(mm.get_top_focused_id() == "dlg_input")
+}
+
+#[test]
+fun test_focus_event_dispatch() {
+    set fm = init FocusManager()
+    set node = init FocusNode("submit_btn", 1)
+    set pressed: bool[] = [false]
+    rewrite node.handle_key_fn = fun(k: KeyEvent) -> bool {
+        if k.code == KEY_ENTER {
+            rewrite pressed[0] = true
+            return true
+        }
+        return false
+    }
+    fm.register(node)
+    fm.set_focus("submit_btn")
+
+    // dispatch other key
+    set handled_tab = fm.dispatch_key(init KeyEvent(KEY_TAB, ""))
+    assert(!handled_tab)
+    assert(!pressed[0])
+
+    // dispatch enter key
+    set handled_enter = fm.dispatch_key(init KeyEvent(KEY_ENTER, ""))
+    assert(handled_enter)
+    assert(pressed[0])
+}

@@ -1,0 +1,128 @@
+load core.panic: panic
+load .ast: SpesModule
+load .errors: siesta_error
+
+public class ModuleEntry {
+    public module_id: string
+    public dep_ids: string[]
+    public symbols: string[]
+
+    public fun init(module_id: string, dep_ids: string[], symbols: string[]) {
+        rewrite this.module_id = module_id
+        rewrite this.dep_ids = dep_ids
+        rewrite this.symbols = symbols
+    }
+}
+
+public class ModuleGraph {
+    entries: ModuleEntry[]
+
+    public fun init() {
+        set empty_entries: ModuleEntry[] = []
+        rewrite this.entries = empty_entries
+    }
+
+    public fun add_module(m: SpesModule) {
+        set dep_ids: string[] = []
+        for i in 0..m.imports.len() {
+            dep_ids.push(m.imports[i].module_id)
+        }
+        set symbols: string[] = []
+        for i in 0..m.themes.len() {
+            symbols.push(m.themes[i].name)
+        }
+        for i in 0..m.components.len() {
+            symbols.push(m.components[i].name)
+        }
+        for i in 0..m.dialogs.len() {
+            symbols.push(m.dialogs[i].name)
+        }
+        for i in 0..m.screens.len() {
+            symbols.push(m.screens[i].name)
+        }
+        set entry = init ModuleEntry(m.module_id, dep_ids, symbols)
+        this.entries.push(entry)
+    }
+
+    public fun has_module(id: string) -> bool {
+        for i in 0..this.entries.len() {
+            if this.entries[i].module_id == id {
+                return true
+            }
+        }
+        return false
+    }
+
+    public fun has_symbol(module_id: string, sym: string) -> bool {
+        for i in 0..this.entries.len() {
+            if this.entries[i].module_id == module_id {
+                set entry = this.entries[i]
+                for j in 0..entry.symbols.len() {
+                    if entry.symbols[j] == sym {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    public fun validate_imports() {
+        for i in 0..this.entries.len() {
+            set entry = this.entries[i]
+            for j in 0..entry.dep_ids.len() {
+                set dep_id = entry.dep_ids[j]
+                if !this.has_module(dep_id) {
+                    panic(siesta_error("module '" + dep_id + "' imported in '" + entry.module_id + "' not found", 1, 1, 110, "semantic"))
+                }
+            }
+        }
+    }
+
+    public fun detect_cycles() {
+        set visited_ids: string[] = []
+        set in_stack_ids: string[] = []
+        for i in 0..this.entries.len() {
+            set mod_id = this.entries[i].module_id
+            if !this.contains_id(ref visited_ids, mod_id) {
+                this.dfs_check_cycle(mod_id, ref visited_ids, ref in_stack_ids, "")
+            }
+        }
+    }
+
+    fun contains_id(ref list: string[], id: string) -> bool {
+        for i in 0..list.len() {
+            if list[i] == id {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun dfs_check_cycle(mod_id: string, ref visited: string[], ref in_stack: string[], chain: string) {
+        visited.push(mod_id)
+        in_stack.push(mod_id)
+        set cur_chain: string = ""
+        if chain.len() == 0 {
+            rewrite cur_chain = mod_id
+        } else {
+            rewrite cur_chain = chain + " -> " + mod_id
+        }
+        for i in 0..this.entries.len() {
+            if this.entries[i].module_id == mod_id {
+                set entry = this.entries[i]
+                for j in 0..entry.dep_ids.len() {
+                    set dep_id = entry.dep_ids[j]
+                    if this.contains_id(ref in_stack, dep_id) {
+                        set cycle_msg = "cyclic dependency detected: " + cur_chain + " -> " + dep_id
+                        panic(siesta_error(cycle_msg, 1, 1, 112, "semantic"))
+                    }
+                    if !this.contains_id(ref visited, dep_id) && this.has_module(dep_id) {
+                        this.dfs_check_cycle(dep_id, ref visited, ref in_stack, cur_chain)
+                    }
+                }
+            }
+        }
+        in_stack.pop()
+    }
+}

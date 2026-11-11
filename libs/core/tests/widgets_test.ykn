@@ -1,0 +1,430 @@
+#![lint::allow("unused_import")]
+
+load core.utils: assert
+load root.logger: log_debug
+load root.buffer: TerminalBuffer
+load root.widgets.text: truncate_text, wrap_chars, wrap_words, TextWidget
+load root.widgets.button: ButtonWidget, BUTTON_ROLE_PRIMARY, BUTTON_ROLE_DANGER, BUTTON_STATE_DISABLED, BUTTON_STATE_FOCUSED
+load root.widgets.input: InputWidget
+load root.widgets.textarea: TextAreaWidget
+load root.widgets.selection: CheckboxWidget, RadioGroupWidget
+load root.widgets.list: ListWidget
+load root.widgets.progress: fractional_block, render_progress_string, ProgressWidget
+load root.widgets.tabs: TabsWidget
+load root.widgets.table: TableWidget, format_table_cell
+load root.widgets.canvas: CanvasWidget, braille_dot_mask, vertical_block_char
+load root.widgets.block: BlockWidget, BORDER_ROUNDED, BORDER_DOUBLE, ALIGN_CENTER
+load root.widgets.paragraph: ParagraphWidget, WRAP_WORD
+load root.widgets.gauge: GaugeWidget, LineGaugeWidget
+load root.widgets.sparkline: SparklineWidget
+load root.widgets.barchart: BarChartWidget
+load root.widgets.scrollbar: ScrollbarWidget
+load root.widgets.tree: TreeWidget, init_tree_item
+load root.layout.rect: init_rect
+load std.itermtool.key: KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_SPACE, KEY_PAGE_UP, KEY_PAGE_DOWN
+
+#[test]
+fun test_text_widget_wrapping_and_truncation() {
+    // truncation
+    set ellip = truncate_text("Hello World", 8, "ellipsis")
+    assert(ellip == "Hello...")
+
+    set clipped = truncate_text("Hello World", 5, "clip")
+    assert(clipped == "Hello")
+
+    // char wrapping
+    set chars = wrap_chars("ABCDEFGH", 3)
+    assert(chars.len() == 3)
+    assert(chars[0] == "ABC")
+    assert(chars[1] == "DEF")
+    assert(chars[2] == "GH")
+
+    // word wrapping
+    set words = wrap_words("The quick brown fox jumps", 10)
+    assert(words.len() == 3)
+    assert(words[0] == "The quick")
+    assert(words[1] == "brown fox")
+    assert(words[2] == "jumps")
+
+    // text widget render
+    set widget = init TextWidget("Hello Terminal", "center", "none", "ellipsis")
+    set buf = init TerminalBuffer(30, 5)
+    widget.render(ref buf, 0, 0, 30, 5)
+    set cell = buf.get_cell(8, 0)
+    assert(cell.ch == "H")
+}
+
+#[test]
+fun test_button_widget_interactions() {
+    set btn = init ButtonWidget("btn_submit", "Submit", BUTTON_ROLE_PRIMARY)
+    assert(!btn.is_disabled())
+    assert(!btn.clicked)
+
+    // keyboard trigger
+    set handled = btn.handle_key(KEY_ENTER)
+    assert(handled)
+    assert(btn.clicked)
+
+    // focus styling
+    btn.set_focused(true)
+    assert(btn.is_focused())
+    assert(btn.formatted_label() == "> [ Submit ] <")
+
+    // disabled state blocks clicks
+    set btn_dis = init ButtonWidget("btn_cancel", "Cancel", BUTTON_ROLE_DANGER, true)
+    assert(btn_dis.is_disabled())
+    set dis_handled = btn_dis.click()
+    assert(!dis_handled)
+    assert(!btn_dis.clicked)
+}
+
+#[test]
+fun test_input_widget_editing_and_password() {
+    set inp = init InputWidget("username", "admin", "Enter user...")
+    assert(inp.value == "admin")
+    assert(inp.cursor_pos == 5)
+
+    // typing
+    inp.insert_char("1")
+    assert(inp.value == "admin1")
+    assert(inp.cursor_pos == 6)
+
+    // cursor navigation and insert
+    inp.move_home()
+    assert(inp.cursor_pos == 0)
+    inp.insert_char("@")
+    assert(inp.value == "@admin1")
+    assert(inp.cursor_pos == 1)
+
+    // backspace
+    inp.backspace()
+    assert(inp.value == "admin1")
+    assert(inp.cursor_pos == 0)
+
+    // delete
+    inp.delete_char()
+    assert(inp.value == "dmin1")
+
+    // password mask
+    set pass = init InputWidget("pwd", "secret", "", 256, true, "*")
+    assert(pass.display_text() == "******")
+
+    // placeholder display when empty
+    set empty_inp = init InputWidget("search", "", "Type to search...")
+    assert(empty_inp.display_text() == "Type to search...")
+}
+
+#[test]
+fun test_textarea_multiline_editing() {
+    set area = init TextAreaWidget("editor", "First line\nSecond line", true)
+    assert(area.get_line_count() == 2)
+    assert(area.cursor_row == 0)
+    assert(area.cursor_col == 0)
+
+    // move down and insert character
+    area.move_down(10)
+    assert(area.cursor_row == 1)
+    area.move_end()
+    assert(area.cursor_col == 11)
+    area.insert_char("!")
+    assert(area.lines[1] == "Second line!")
+
+    // insert newline splits line
+    area.insert_newline()
+    assert(area.get_line_count() == 3)
+    assert(area.cursor_row == 2)
+    assert(area.cursor_col == 0)
+
+    // backspace at col 0 merges with line above
+    area.backspace()
+    assert(area.get_line_count() == 2)
+    assert(area.cursor_row == 1)
+    assert(area.cursor_col == 12)
+}
+
+#[test]
+fun test_checkbox_and_radiogroup() {
+    // checkbox
+    set cb = init CheckboxWidget("agree", "I agree to terms", false)
+    assert(!cb.checked)
+    assert(cb.display_text() == "  [ ] I agree to terms")
+
+    cb.toggle()
+    assert(cb.checked)
+    assert(cb.display_text() == "  [X] I agree to terms")
+
+    // radio group
+    set rg = init RadioGroupWidget("theme_sel", 0)
+    rg.add_item("Light")
+    rg.add_item("Dark")
+    rg.add_item("High Contrast")
+    assert(rg.count() == 3)
+    assert(rg.selected_index == 0)
+
+    rg.next()
+    assert(rg.selected_index == 1)
+
+    rg.next()
+    assert(rg.selected_index == 2)
+
+    // wrap around
+    rg.next()
+    assert(rg.selected_index == 0)
+
+    // prev
+    rg.prev()
+    assert(rg.selected_index == 2)
+}
+
+#[test]
+fun test_virtualized_list_scrolling() {
+    set list = init ListWidget("files_list", 4)
+    for i in 0..10 {
+        list.add_item("Item ${i}")
+    }
+    assert(list.count() == 10)
+    assert(list.selected_index == 0)
+    assert(list.scroll_offset == 0)
+    assert(list.visible_count() == 4)
+
+    // move down inside view
+    list.move_down()
+    assert(list.selected_index == 1)
+    assert(list.scroll_offset == 0)
+
+    // move down past view boundary causes auto-scroll
+    list.move_down()
+    list.move_down()
+    list.move_down()
+    list.move_down()
+    assert(list.selected_index == 5)
+    assert(list.scroll_offset == 2)
+
+    // end and home navigation
+    list.move_end()
+    assert(list.selected_index == 9)
+    assert(list.scroll_offset == 6)
+
+    list.move_home()
+    assert(list.selected_index == 0)
+    assert(list.scroll_offset == 0)
+}
+
+#[test]
+fun test_progress_fractional_blocks() {
+    assert(fractional_block(7) == "▉")
+    assert(fractional_block(4) == "▌")
+    assert(fractional_block(1) == "▏")
+    assert(fractional_block(0) == "")
+
+    // 0%
+    set empty_bar = render_progress_string(0.0, 5)
+    assert(empty_bar == "░░░░░")
+
+    // 100%
+    set full_bar = render_progress_string(100.0, 5)
+    assert(full_bar == "█████")
+
+    // 50%
+    set half_bar = render_progress_string(50.0, 6)
+    assert(half_bar == "███░░░")
+
+    // progress widget
+    set prog = init ProgressWidget(75.0, true)
+    assert(prog.value == 75.0)
+    assert(prog.show_percentage)
+}
+
+#[test]
+fun test_tabs_widget_navigation() {
+    set tabs = init TabsWidget("main_nav", 0)
+    tabs.add_tab("General")
+    tabs.add_tab("Network")
+    tabs.add_tab("Security")
+
+    assert(tabs.count() == 3)
+    assert(tabs.active_tab == 0)
+
+    // next
+    tabs.next_tab()
+    assert(tabs.active_tab == 1)
+
+    // next
+    tabs.next_tab()
+    assert(tabs.active_tab == 2)
+
+    // wrap
+    tabs.next_tab()
+    assert(tabs.active_tab == 0)
+
+    // prev
+    tabs.prev_tab()
+    assert(tabs.active_tab == 2)
+
+    // direct selection
+    set ok = tabs.select_tab(1)
+    assert(ok)
+    assert(tabs.active_tab == 1)
+}
+
+#[test]
+fun test_table_widget_sorting_and_navigation() {
+    assert(format_table_cell("Test", 6, "left") == "Test  ")
+    assert(format_table_cell("Test", 6, "right") == "  Test")
+    assert(format_table_cell("Test", 6, "center") == " Test ")
+    assert(format_table_cell("Superlongtext", 6, "left") == "Supe..")
+
+    set tbl = init TableWidget("users_table")
+    tbl.add_column("ID", 4, "right")
+    tbl.add_column("Name", 10, "left")
+    tbl.add_column("Role", 8, "left")
+    assert(tbl.col_count() == 3)
+
+    set r1: string[] = ["3", "Charlie", "Admin"]
+    set r2: string[] = ["1", "Alice", "User"]
+    set r3: string[] = ["2", "Bob", "Manager"]
+    tbl.add_row(r1)
+    tbl.add_row(r2)
+    tbl.add_row(r3)
+    assert(tbl.row_count() == 3)
+
+    // sort by ID ascending
+    tbl.sort_by(0, true)
+    assert(tbl.rows[0].cells[0] == "1")
+    assert(tbl.rows[1].cells[0] == "2")
+    assert(tbl.rows[2].cells[0] == "3")
+
+    // sort by ID descending
+    tbl.sort_by(0, false)
+    assert(tbl.rows[0].cells[0] == "3")
+    assert(tbl.rows[1].cells[0] == "2")
+    assert(tbl.rows[2].cells[0] == "1")
+
+    // navigation
+    tbl.select_row(0)
+    assert(tbl.selected_index == 0)
+    tbl.select_next()
+    assert(tbl.selected_index == 1)
+    tbl.handle_key(KEY_UP)
+    assert(tbl.selected_index == 0)
+
+    // render into buffer
+    set buf = init TerminalBuffer(35, 6)
+    tbl.render(ref buf, 0, 0, 35, 6)
+    set cell = buf.get_cell(0, 0)
+    assert(cell.bold)
+}
+
+#[test]
+fun test_canvas_braille_and_barchart() {
+    // braille dot bitmask checks
+    assert(braille_dot_mask(0, 0) == 1)
+    assert(braille_dot_mask(1, 0) == 8)
+    assert(braille_dot_mask(0, 3) == 64)
+    assert(braille_dot_mask(1, 3) == 128)
+
+    // canvas initialization
+    set canvas = init CanvasWidget("chart", 10, 5)
+    assert(canvas.pixel_width() == 20)
+    assert(canvas.pixel_height() == 20)
+
+    // single pixel
+    canvas.set_pixel(2, 3)
+    assert(canvas.get_pixel(2, 3))
+    assert(!canvas.get_pixel(2, 4))
+    canvas.clear_pixel(2, 3)
+    assert(!canvas.get_pixel(2, 3))
+
+    // line drawing
+    canvas.draw_line(0, 0, 10, 10)
+    assert(canvas.get_pixel(0, 0))
+    assert(canvas.get_pixel(5, 5))
+    assert(canvas.get_pixel(10, 10))
+
+    // rect drawing
+    canvas.draw_rect(2, 2, 6, 6)
+    assert(canvas.get_pixel(2, 2))
+    assert(canvas.get_pixel(7, 2))
+
+    // vertical block characters
+    assert(vertical_block_char(0.0) == " ")
+    assert(vertical_block_char(1.0) == "█")
+    assert(vertical_block_char(0.5) == "▄")
+
+    // barchart on canvas and render to buffer
+    set buf = init TerminalBuffer(10, 5)
+    set vals: float64[] = [10.0, 50.0, 100.0]
+    canvas.clear()
+    canvas.draw_barchart(vals, 100.0)
+    assert(canvas.get_pixel(17, 19))
+    canvas.render(ref buf, 0, 0)
+}
+
+#[test]
+fun test_block_widget_borders_and_titles() {
+    set block = init BlockWidget(BORDER_ROUNDED, "Demo", ALIGN_CENTER)
+    set buf = init TerminalBuffer(20, 5)
+    set bounds = init_rect(0, 0, 20, 5)
+    block.render(ref buf, ref bounds)
+
+    // check corners
+    assert(buf.get_cell(0, 0).ch == "╭")
+    assert(buf.get_cell(19, 0).ch == "╮")
+    assert(buf.get_cell(0, 4).ch == "╰")
+    assert(buf.get_cell(19, 4).ch == "╯")
+
+    // check inner rect
+    set inner = block.inner(ref bounds)
+    assert(inner.x == 1 && inner.y == 1 && inner.width == 18 && inner.height == 3)
+}
+
+#[test]
+fun test_paragraph_and_scrollbar() {
+    set p = init ParagraphWidget("First line\nSecond line is longer", WRAP_WORD)
+    set buf = init TerminalBuffer(30, 4)
+    p.render(ref buf, init_rect(0, 0, 30, 4))
+    assert(buf.get_cell(0, 0).ch == "F")
+    assert(buf.get_cell(0, 1).ch == "S")
+
+    set sb = init ScrollbarWidget(100, 20, 0, true)
+    set sbbuf = init TerminalBuffer(1, 10)
+    sb.render(ref sbbuf, init_rect(0, 0, 1, 10))
+    assert(sbbuf.get_cell(0, 0).ch == "▲")
+    assert(sbbuf.get_cell(0, 9).ch == "▼")
+}
+
+#[test]
+fun test_gauge_sparkline_and_barchart() {
+    set g = init GaugeWidget(75.0, "Progress")
+    set gbuf = init TerminalBuffer(20, 1)
+    g.render(ref gbuf, init_rect(0, 0, 20, 1))
+    assert(gbuf.get_cell(0, 0).ch == "█")
+
+    set data: int32[] = [cast(0, "int32"), cast(10, "int32"), cast(20, "int32"), cast(50, "int32"), cast(100, "int32")]
+    set spark = init SparklineWidget(data, 100)
+    set spbuf = init TerminalBuffer(10, 1)
+    spark.render(ref spbuf, init_rect(0, 0, 10, 1))
+    assert(spbuf.get_cell(4, 0).ch == "█")
+
+    set bdata: int32[] = [cast(10, "int32"), cast(30, "int32"), cast(20, "int32")]
+    set bar = init BarChartWidget(bdata, ["A", "B", "C"], 30, 2, 1)
+    set bbuf = init TerminalBuffer(10, 4)
+    bar.render(ref bbuf, init_rect(0, 0, 10, 4))
+    assert(bbuf.get_cell(0, 3).ch == "A")
+    assert(bbuf.get_cell(3, 3).ch == "B")
+    assert(bbuf.get_cell(6, 3).ch == "C")
+}
+
+#[test]
+fun test_tree_widget() {
+    set items = [
+        init_tree_item("1", "root", 0, true, true),
+        init_tree_item("2", "child.txt", 1, false, false)
+    ]
+    set tree = init TreeWidget(items)
+    set buf = init TerminalBuffer(30, 4)
+    tree.render(ref buf, init_rect(0, 0, 30, 4))
+
+    assert(tree.handle_key(KEY_DOWN))
+    assert(tree.selected_index == 1)
+}

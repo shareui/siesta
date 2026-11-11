@@ -1,0 +1,444 @@
+load core.panic: panic
+load core.mem: persistent
+load .tokens: Token
+load .ast: SpesModule, UseImport, ThemeDef, ThemeToken, ComponentDef, DialogDef, ScreenDef
+load .ast: PropDef, StateFieldDef, ShortcutDef, WidgetNode, WidgetProp, WidgetEvent, init_widget_node
+load .lexer: SpesLexer
+load .errors: siesta_error
+
+public class SpesParser {
+    lexer: SpesLexer
+    curr: Token
+    peek: Token
+
+    public fun init(src: string) {
+        rewrite this.lexer = init SpesLexer(src)
+        rewrite this.curr = this.lexer.next_token()
+        rewrite this.peek = this.lexer.next_token()
+    }
+
+    fun advance() {
+        rewrite this.curr = this.peek
+        rewrite this.peek = this.lexer.next_token()
+    }
+
+    fun match_token(expected_kind: string) -> bool {
+        if this.curr.kind == expected_kind {
+            this.advance()
+            return true
+        }
+        return false
+    }
+
+    fun expect_token(expected_kind: string) -> Token {
+        if this.curr.kind != expected_kind {
+            set msg: string = "expected '" + expected_kind + "', got '" + this.curr.kind + "' ('" + this.curr.value + "')"
+            panic(siesta_error(msg, this.curr.line, this.curr.col, 102, "syntax"))
+        }
+        set tok: Token = this.curr
+        this.advance()
+        return tok
+    }
+
+    public fun parse_module() -> SpesModule {
+        set _extern: Token = this.expect_token("extern")
+        set id_tok: Token = this.expect_token("IDENT")
+        set imports: UseImport[] = []
+        set themes: ThemeDef[] = []
+        set components: ComponentDef[] = []
+        set dialogs: DialogDef[] = []
+        set screens: ScreenDef[] = []
+        while this.curr.kind != "EOF" {
+            if this.curr.kind == "use" {
+                imports.push(this.parse_use())
+            } elif this.curr.kind == "theme" {
+                themes.push(this.parse_theme())
+            } elif this.curr.kind == "component" {
+                components.push(this.parse_component())
+            } elif this.curr.kind == "dialog" {
+                dialogs.push(this.parse_dialog())
+            } elif this.curr.kind == "screen" {
+                screens.push(this.parse_screen())
+            } else {
+                set unexpected: Token = this.curr
+                panic(siesta_error("unexpected token: '" + unexpected.value + "'", unexpected.line, unexpected.col, 104, "syntax"))
+            }
+        }
+        return SpesModule {
+            module_id: id_tok.value,
+            imports: imports,
+            themes: themes,
+            components: components,
+            dialogs: dialogs,
+            screens: screens
+        }
+    }
+
+    fun parse_use() -> UseImport {
+        set _use_tok: Token = this.expect_token("use")
+        set mod_tok: Token = this.expect_token("IDENT")
+        set is_wildcard: bool = false
+        set sym_list: string[] = []
+        if this.match_token("(") {
+            if this.match_token("*") {
+                rewrite is_wildcard = true
+            } else {
+                while this.curr.kind != ")" && this.curr.kind != "EOF" {
+                    set sym_tok: Token = this.expect_token("IDENT")
+                    sym_list.push(sym_tok.value)
+                    if !this.match_token(",") {
+                        break
+                    }
+                }
+            }
+            set _close: Token = this.expect_token(")")
+        }
+        return UseImport { module_id: mod_tok.value, is_wildcard: is_wildcard, symbols: sym_list }
+    }
+
+    fun parse_theme() -> ThemeDef {
+        set _theme_tok: Token = this.expect_token("theme")
+        set name_tok: Token = this.expect_token("IDENT")
+        set is_adaptive: bool = this.match_token("adaptive")
+        set _open: Token = this.expect_token("{")
+        set token_list: ThemeToken[] = []
+        while this.curr.kind != "}" && this.curr.kind != "EOF" {
+            set key_tok: Token = this.expect_token("IDENT")
+            set _colon: Token = this.expect_token(":")
+            set val_str: string = this.parse_raw_value()
+            token_list.push(ThemeToken { key: key_tok.value, val: val_str })
+        }
+        set _close: Token = this.expect_token("}")
+        return ThemeDef { name: name_tok.value, is_adaptive: is_adaptive, tokens: token_list }
+    }
+
+    fun parse_shortcuts_block() -> ShortcutDef[] {
+        set _st_tok: Token = this.expect_token("shortcuts")
+        set _open: Token = this.expect_token("{")
+        set list: ShortcutDef[] = []
+        while this.curr.kind != "}" && this.curr.kind != "EOF" {
+            set key_tok: Token = this.curr
+            this.advance()
+            set _colon: Token = this.expect_token(":")
+            set action_tok: Token = this.expect_token("IDENT")
+            set raw_key = key_tok.value
+            if raw_key.len() >= 2 && raw_key[0..1] == "\"" && raw_key[raw_key.len() - 1..raw_key.len()] == "\"" {
+                rewrite raw_key = raw_key[1..raw_key.len() - 1]
+            }
+            list.push(ShortcutDef { key_combo: raw_key, action_name: action_tok.value })
+        }
+        set _close: Token = this.expect_token("}")
+        return list
+    }
+
+    fun parse_component() -> ComponentDef {
+        set _comp_tok: Token = this.expect_token("component")
+        set name_tok: Token = this.expect_token("IDENT")
+        set props: PropDef[] = []
+        if this.curr.kind == "(" {
+            rewrite props = this.parse_param_defs()
+        }
+        set _open: Token = this.expect_token("{")
+        set state_fields: StateFieldDef[] = []
+        set shortcuts: ShortcutDef[] = []
+        set widgets: WidgetNode[] = []
+        while this.curr.kind != "}" && this.curr.kind != "EOF" {
+            if this.curr.kind == "state" {
+                rewrite state_fields = this.parse_state_block()
+            } elif this.curr.kind == "shortcuts" {
+                rewrite shortcuts = this.parse_shortcuts_block()
+            } else {
+                widgets.push(this.parse_widget())
+            }
+        }
+        set _close: Token = this.expect_token("}")
+        return ComponentDef { name: name_tok.value, props: props, state_fields: state_fields, shortcuts: shortcuts, root_widgets: widgets }
+    }
+
+    fun parse_dialog() -> DialogDef {
+        set _dlg_tok: Token = this.expect_token("dialog")
+        set name_tok: Token = this.expect_token("IDENT")
+        set props: PropDef[] = []
+        if this.curr.kind == "(" {
+            rewrite props = this.parse_param_defs()
+        }
+        set _open: Token = this.expect_token("{")
+        set state_fields: StateFieldDef[] = []
+        set shortcuts: ShortcutDef[] = []
+        set widgets: WidgetNode[] = []
+        set size_w: int32 = 0
+        set size_h: int32 = 0
+        set is_modal: bool = false
+        set dim_backdrop: bool = false
+        while this.curr.kind != "}" && this.curr.kind != "EOF" {
+            if this.curr.kind == "state" {
+                rewrite state_fields = this.parse_state_block()
+            } elif this.curr.kind == "shortcuts" {
+                rewrite shortcuts = this.parse_shortcuts_block()
+            } elif this.curr.kind == "IDENT" && this.peek.kind == ":" {
+                set key = this.curr.value
+                this.advance()
+                set _colon = this.expect_token(":")
+                if key == "modal" {
+                    rewrite is_modal = (this.curr.kind == "true")
+                    this.advance()
+                } elif key == "dimBackdrop" {
+                    rewrite dim_backdrop = (this.curr.kind == "true")
+                    this.advance()
+                } elif key == "width" {
+                    rewrite size_w = parse_i32(this.curr.value)
+                    this.advance()
+                } elif key == "height" {
+                    rewrite size_h = parse_i32(this.curr.value)
+                    this.advance()
+                } else {
+                    set _val = this.parse_raw_value()
+                }
+            } else {
+                widgets.push(this.parse_widget())
+            }
+        }
+        set _close: Token = this.expect_token("}")
+        return DialogDef {
+            name: name_tok.value,
+            props: props,
+            state_fields: state_fields,
+            shortcuts: shortcuts,
+            size_w: size_w,
+            size_h: size_h,
+            border: "",
+            border_color: "",
+            bg: "",
+            is_modal: is_modal,
+            dim_backdrop: dim_backdrop,
+            root_widgets: widgets
+        }
+    }
+
+    fun parse_screen() -> ScreenDef {
+        set _scr_tok: Token = this.expect_token("screen")
+        set name_tok: Token = this.expect_token("IDENT")
+        set _open: Token = this.expect_token("{")
+        set state_fields: StateFieldDef[] = []
+        set shortcuts: ShortcutDef[] = []
+        set widgets: WidgetNode[] = []
+        while this.curr.kind != "}" && this.curr.kind != "EOF" {
+            if this.curr.kind == "state" {
+                rewrite state_fields = this.parse_state_block()
+            } elif this.curr.kind == "shortcuts" {
+                rewrite shortcuts = this.parse_shortcuts_block()
+            } else {
+                widgets.push(this.parse_widget())
+            }
+        }
+        set _close: Token = this.expect_token("}")
+        return ScreenDef { name: name_tok.value, state_fields: state_fields, shortcuts: shortcuts, root_widgets: widgets }
+    }
+
+    fun parse_param_defs() -> PropDef[] {
+        set _open: Token = this.expect_token("(")
+        set props: PropDef[] = []
+        while this.curr.kind != ")" && this.curr.kind != "EOF" {
+            set name_tok: Token = this.expect_token("IDENT")
+            set _colon: Token = this.expect_token(":")
+            set type_str: string = this.parse_type_signature()
+            set default_val: string = ""
+            set has_default: bool = false
+            if this.match_token("=") {
+                rewrite default_val = this.parse_raw_value()
+                rewrite has_default = true
+            }
+            props.push(PropDef { name: name_tok.value, type_name: type_str, default_val: default_val, has_default: has_default })
+            if !this.match_token(",") {
+                break
+            }
+        }
+        set _close: Token = this.expect_token(")")
+        return props
+    }
+
+    fun parse_type_signature() -> string {
+        set type_tok: Token = this.expect_token("IDENT")
+        set type_str: string = type_tok.value
+        if type_str == "fun" && this.match_token("(") {
+            rewrite type_str = "fun("
+            while this.curr.kind != ")" && this.curr.kind != "EOF" {
+                rewrite type_str = type_str + this.curr.value
+                this.advance()
+            }
+            set _c: Token = this.expect_token(")")
+            rewrite type_str = type_str + ")"
+            if this.match_token("->") {
+                set ret_tok: Token = this.expect_token("IDENT")
+                rewrite type_str = type_str + " -> " + ret_tok.value
+            }
+        }
+        if this.match_token("?") {
+            rewrite type_str = type_str + "?"
+        }
+        if this.curr.kind == "[" && this.peek.kind == "]" {
+            set _: Token = this.expect_token("[")
+            set __: Token = this.expect_token("]")
+            rewrite type_str = type_str + "[]"
+        }
+        if this.match_token("?") {
+            rewrite type_str = type_str + "?"
+        }
+        return type_str
+    }
+
+    fun is_event_key(name: string) -> bool {
+        if name.len() >= 3 && name[0..2] == "on" {
+            set third_ch = name[2..3]
+            if third_ch == "_" || (third_ch >= "A" && third_ch <= "Z") {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun parse_state_block() -> StateFieldDef[] {
+        set _st_tok: Token = this.expect_token("state")
+        set _open: Token = this.expect_token("{")
+        set fields: StateFieldDef[] = []
+        while this.curr.kind != "}" && this.curr.kind != "EOF" {
+            set name_tok: Token = this.expect_token("IDENT")
+            set _colon: Token = this.expect_token(":")
+            set type_tok: Token = this.expect_token("IDENT")
+            set _eq: Token = this.expect_token("=")
+            set val_str: string = this.parse_raw_value()
+            fields.push(StateFieldDef { name: name_tok.value, type_name: type_tok.value, initial_val: val_str })
+        }
+        set _close: Token = this.expect_token("}")
+        return fields
+    }
+
+    fun parse_widget() -> WidgetNode {
+        set kind_tok: Token = this.curr
+        this.advance()
+        set node: WidgetNode = init_widget_node(kind_tok.value)
+        if this.match_token("(") {
+            this.parse_widget_args(ref node)
+        }
+        if this.match_token("{") {
+            this.parse_widget_body(ref node)
+        }
+        return node
+    }
+
+    fun parse_widget_args(ref node: WidgetNode) {
+        while this.curr.kind != ")" && this.curr.kind != "EOF" {
+            set is_prop: bool = (this.curr.kind == "IDENT" || this.curr.kind == "border")
+            if is_prop && this.peek.kind == ":" {
+                set key_tok: Token = this.curr
+                this.advance()
+                set _colon: Token = this.expect_token(":")
+                set val_str: string = this.parse_raw_value()
+                if this.is_event_key(key_tok.value) {
+                    node.events.push(WidgetEvent { name: key_tok.value, handler: val_str })
+                }
+                node.props.push(WidgetProp { key: key_tok.value, val: val_str })
+            } else {
+                set arg_val: string = this.parse_raw_value()
+                rewrite node.pos_arg = arg_val
+            }
+            if !this.match_token(",") {
+                break
+            }
+        }
+        set _close: Token = this.expect_token(")")
+    }
+
+    fun parse_widget_body(ref node: WidgetNode) {
+        while this.curr.kind != "}" && this.curr.kind != "EOF" {
+            if this.curr.kind == "anim" && this.peek.kind == ":" {
+                this.advance()
+                set _colon: Token = this.expect_token(":")
+                rewrite node.anim_expr = this.parse_raw_value()
+            } elif this.curr.kind == "IDENT" && this.peek.kind == ":" {
+                set key_tok: Token = this.curr
+                this.advance()
+                set _colon: Token = this.expect_token(":")
+                if key_tok.value == "id" {
+                    rewrite node.id_attr = this.curr.value
+                    this.advance()
+                } elif this.is_event_key(key_tok.value) {
+                    set handler_str: string = this.parse_raw_value()
+                    node.events.push(WidgetEvent { name: key_tok.value, handler: handler_str })
+                    node.props.push(WidgetProp { key: key_tok.value, val: handler_str })
+                } else {
+                    set val_str: string = this.parse_raw_value()
+                    node.props.push(WidgetProp { key: key_tok.value, val: val_str })
+                }
+            } else {
+                node.children.push(this.parse_widget())
+            }
+        }
+        set _close: Token = this.expect_token("}")
+    }
+
+    fun parse_raw_value() -> string {
+        set res: string = ""
+        set depth_paren: int32 = 0
+        set depth_brace: int32 = 0
+        while this.curr.kind != "EOF" {
+            if this.curr.kind == "(" {
+                rewrite depth_paren = depth_paren + 1
+            } elif this.curr.kind == ")" {
+                if depth_paren == 0 {
+                    break
+                }
+                rewrite depth_paren = depth_paren - 1
+            } elif this.curr.kind == "{" {
+                rewrite depth_brace = depth_brace + 1
+            } elif this.curr.kind == "}" {
+                if depth_brace == 0 {
+                    break
+                }
+                rewrite depth_brace = depth_brace - 1
+            } elif this.curr.kind == "," {
+                if depth_paren == 0 && depth_brace == 0 {
+                    break
+                }
+            }
+            if res.len() > 0 {
+                rewrite res = res + " "
+            }
+            if this.curr.kind == "STRING" {
+                rewrite res = res + "\"" + this.curr.value + "\""
+            } elif this.curr.kind == "TR_STRING" {
+                rewrite res = res + "tr\"" + this.curr.value + "\""
+            } else {
+                rewrite res = res + this.curr.value
+            }
+            this.advance()
+            if depth_paren == 0 && depth_brace == 0 {
+                if this.curr.kind != "." && this.curr.kind != "->" && this.curr.kind != "=>" && this.curr.kind != "(" && this.curr.kind != "{" {
+                    if this.peek.kind == ":" || this.curr.kind == "}" || this.curr.kind == ")" || this.curr.kind == "," {
+                        break
+                    }
+                }
+            }
+        }
+        return res
+    }
+}
+
+#[lint::allow("all")]
+fun parse_i32(s: string) -> int32 {
+    set res: int32 = 0
+    for i in 0..s.len() {
+        set ch = s[i..i + 1]
+        if ch == "0" { rewrite res = res * cast(10, "int32") + cast(0, "int32") }
+        elif ch == "1" { rewrite res = res * cast(10, "int32") + cast(1, "int32") }
+        elif ch == "2" { rewrite res = res * cast(10, "int32") + cast(2, "int32") }
+        elif ch == "3" { rewrite res = res * cast(10, "int32") + cast(3, "int32") }
+        elif ch == "4" { rewrite res = res * cast(10, "int32") + cast(4, "int32") }
+        elif ch == "5" { rewrite res = res * cast(10, "int32") + cast(5, "int32") }
+        elif ch == "6" { rewrite res = res * cast(10, "int32") + cast(6, "int32") }
+        elif ch == "7" { rewrite res = res * cast(10, "int32") + cast(7, "int32") }
+        elif ch == "8" { rewrite res = res * cast(10, "int32") + cast(8, "int32") }
+        elif ch == "9" { rewrite res = res * cast(10, "int32") + cast(9, "int32") }
+    }
+    return res
+}

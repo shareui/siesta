@@ -1,0 +1,104 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.itermtool.key: KEY_LEFT, KEY_RIGHT, KEY_TAB
+load ..buffer: TerminalBuffer
+
+public class TabsWidget {
+    public id: string
+    public titles: string[]
+    public active_tab: int32
+    public focused: bool
+
+    public fun init(id: string, active_tab: int32 = 0) {
+        set empty_titles: string[] = []
+        rewrite this.id = id
+        rewrite this.titles = empty_titles
+        rewrite this.active_tab = active_tab
+        rewrite this.focused = false
+    }
+
+    public fun add_tab(title: string) -> TabsWidget {
+        this.titles.push(title)
+        return this
+    }
+
+    public fun count() -> int32 {
+        return cast(this.titles.len(), "int32")
+    }
+
+    public fun select_tab(idx: int32) -> bool {
+        if idx >= 0 && idx < this.count() {
+            rewrite this.active_tab = idx
+            return true
+        }
+        return false
+    }
+
+    public fun next_tab() -> int32 {
+        if this.count() == 0 {
+            return -1
+        }
+        set next_idx = (this.active_tab + 1) % this.count()
+        this.select_tab(next_idx)
+        return this.active_tab
+    }
+
+    public fun prev_tab() -> int32 {
+        if this.count() == 0 {
+            return -1
+        }
+        set prev_idx = this.active_tab - 1
+        if prev_idx < 0 {
+            rewrite prev_idx = this.count() - 1
+        }
+        this.select_tab(prev_idx)
+        return this.active_tab
+    }
+
+    public fun handle_key(code: int32) -> bool {
+        if this.count() == 0 {
+            return false
+        }
+        if code == KEY_RIGHT {
+            this.next_tab()
+            return true
+        }
+        if code == KEY_LEFT {
+            this.prev_tab()
+            return true
+        }
+        return false
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32) {
+        set cur_x = x
+        for i in 0..this.titles.len() {
+            set idx = cast(i, "int32")
+            set title = this.titles[i]
+            set is_active = (idx == this.active_tab)
+
+            set tab_str = "  " + title + "  "
+            set fg = "default"
+            set bg = "default"
+            set bold = false
+            set reversed = false
+
+            if is_active {
+                rewrite tab_str = "[ " + title + " ]"
+                rewrite fg = "cyan"
+                rewrite bold = true
+                if this.focused {
+                    rewrite reversed = true
+                }
+            }
+
+            buf.draw_text(cur_x, y, tab_str, fg, bg, bold, false, false, false, reversed)
+            rewrite cur_x = cur_x + cast(tab_str.len(), "int32")
+            if i < this.titles.len() - 1 {
+                buf.draw_text(cur_x, y, "|", "default", "default", false, true, false, false, false)
+                rewrite cur_x = cur_x + 1
+            }
+        }
+    }
+}

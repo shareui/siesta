@@ -1,0 +1,299 @@
+load core.utils: cast
+load .rect: Rect, init_rect
+
+public struct LayoutNode {
+    fixed_w: int32
+    fixed_h: int32
+    weight: int32
+    align: string
+}
+
+public fun init_layout_node(fixed_w: int32 = 0, fixed_h: int32 = 0, weight: int32 = 0, align: string = "stretch") -> LayoutNode {
+    return LayoutNode {
+        fixed_w: fixed_w,
+        fixed_h: fixed_h,
+        weight: weight,
+        align: align
+    }
+}
+
+public fun calc_cross_axis(base_pos: int32, inner_len: int32, fixed_len: int32, align: string) -> int32[] {
+    set res: int32[] = []
+    if align == "stretch" || fixed_len <= 0 {
+        res.push(base_pos)
+        res.push(inner_len)
+        return res
+    }
+    set sz: int32 = if fixed_len < inner_len { fixed_len } else { inner_len }
+    if align == "center" {
+        res.push(base_pos + (inner_len - sz) / 2)
+        res.push(sz)
+    } elif align == "end" {
+        res.push(base_pos + inner_len - sz)
+        res.push(sz)
+    } else {
+        res.push(base_pos)
+        res.push(sz)
+    }
+    return res
+}
+
+public fun layout_row(bounds: Rect, paddingX: int32, paddingY: int32, gap: int32, justify: string, align: string, items: LayoutNode[]) -> Rect[] {
+    set rects: Rect[] = []
+    set count = cast(items.len(), "int32")
+    if count == 0 { return rects }
+    set inner_w = bounds.width - paddingX * 2
+    set inner_h = bounds.height - paddingY * 2
+    if inner_w <= 0 || inner_h <= 0 { return rects }
+
+    set total_gaps: int32 = 0
+    if count > 1 {
+        rewrite total_gaps = gap * (count - 1)
+    }
+    set avail_w = inner_w - total_gaps
+    set total_weight: int32 = 0
+    set fixed_sum: int32 = 0
+    for i in 0..items.len() {
+        if items[i].weight > 0 {
+            rewrite total_weight = total_weight + items[i].weight
+        } else {
+            rewrite fixed_sum = fixed_sum + items[i].fixed_w
+        }
+    }
+    set remain_w = avail_w - fixed_sum
+    if remain_w < 0 { rewrite remain_w = 0 }
+
+    set cur_x = bounds.x + paddingX
+    set weight_rem = total_weight
+    set space_rem = remain_w
+    if total_weight == 0 && remain_w > 0 {
+        if justify == "center" { rewrite cur_x = cur_x + remain_w / 2 }
+        elif justify == "end" { rewrite cur_x = cur_x + remain_w }
+    }
+
+    for i in 0..items.len() {
+        set it = items[i]
+        set item_w: int32 = it.fixed_w
+        if it.weight > 0 && weight_rem > 0 {
+            rewrite item_w = (space_rem * it.weight) / weight_rem
+            rewrite space_rem = space_rem - item_w
+            rewrite weight_rem = weight_rem - it.weight
+        }
+        set item_align: string = if it.align == "stretch" { align } else { it.align }
+        set cross = calc_cross_axis(bounds.y + paddingY, inner_h, it.fixed_h, item_align)
+        rects.push(init_rect(cur_x, cross[0], item_w, cross[1]))
+        rewrite cur_x = cur_x + item_w + gap
+    }
+    return rects
+}
+
+public fun layout_col(bounds: Rect, paddingX: int32, paddingY: int32, gap: int32, justify: string, align: string, items: LayoutNode[]) -> Rect[] {
+    set rects: Rect[] = []
+    set count = cast(items.len(), "int32")
+    if count == 0 { return rects }
+    set inner_w = bounds.width - paddingX * 2
+    set inner_h = bounds.height - paddingY * 2
+    if inner_w <= 0 || inner_h <= 0 { return rects }
+
+    set total_gaps: int32 = 0
+    if count > 1 {
+        rewrite total_gaps = gap * (count - 1)
+    }
+    set avail_h = inner_h - total_gaps
+    set total_weight: int32 = 0
+    set fixed_sum: int32 = 0
+    for i in 0..items.len() {
+        if items[i].weight > 0 {
+            rewrite total_weight = total_weight + items[i].weight
+        } else {
+            rewrite fixed_sum = fixed_sum + items[i].fixed_h
+        }
+    }
+    set remain_h = avail_h - fixed_sum
+    if remain_h < 0 { rewrite remain_h = 0 }
+
+    set cur_y = bounds.y + paddingY
+    set weight_rem = total_weight
+    set space_rem = remain_h
+    if total_weight == 0 && remain_h > 0 {
+        if justify == "center" { rewrite cur_y = cur_y + remain_h / 2 }
+        elif justify == "end" { rewrite cur_y = cur_y + remain_h }
+    }
+
+    for i in 0..items.len() {
+        set it = items[i]
+        set item_h: int32 = it.fixed_h
+        if it.weight > 0 && weight_rem > 0 {
+            rewrite item_h = (space_rem * it.weight) / weight_rem
+            rewrite space_rem = space_rem - item_h
+            rewrite weight_rem = weight_rem - it.weight
+        }
+        set item_align: string = if it.align == "stretch" { align } else { it.align }
+        set cross = calc_cross_axis(bounds.x + paddingX, inner_w, it.fixed_w, item_align)
+        rects.push(init_rect(cross[0], cur_y, cross[1], item_h))
+        rewrite cur_y = cur_y + item_h + gap
+    }
+    return rects
+}
+
+public fun layout_stack(bounds: Rect, paddingX: int32, paddingY: int32, items: LayoutNode[]) -> Rect[] {
+    set rects: Rect[] = []
+    set inner_w = bounds.width - paddingX * 2
+    set inner_h = bounds.height - paddingY * 2
+    for i in 0..items.len() {
+        set it = items[i]
+        set cross_x = calc_cross_axis(bounds.x + paddingX, inner_w, it.fixed_w, it.align)
+        set cross_y = calc_cross_axis(bounds.y + paddingY, inner_h, it.fixed_h, it.align)
+        rects.push(init_rect(cross_x[0], cross_y[0], cross_x[1], cross_y[1]))
+    }
+    return rects
+}
+
+public fun layout_grid(bounds: Rect, cols: int32, rows: int32, gapX: int32, gapY: int32) -> Rect[] {
+    set rects: Rect[] = []
+    if cols <= 0 || rows <= 0 { return rects }
+    set avail_w = bounds.width - gapX * (cols - 1)
+    set avail_h = bounds.height - gapY * (rows - 1)
+    if avail_w <= 0 || avail_h <= 0 { return rects }
+
+    set cell_w = avail_w / cols
+    set cell_h = avail_h / rows
+    for r in 0..rows {
+        set ri = cast(r, "int32")
+        set y = bounds.y + ri * (cell_h + gapY)
+        for c in 0..cols {
+            set ci = cast(c, "int32")
+            set x = bounds.x + ci * (cell_w + gapX)
+            rects.push(init_rect(x, y, cell_w, cell_h))
+        }
+    }
+    return rects
+}
+
+public static CONSTRAINT_LENGTH: int32 = 1
+public static CONSTRAINT_PERCENTAGE: int32 = 2
+public static CONSTRAINT_RATIO: int32 = 3
+public static CONSTRAINT_MIN: int32 = 4
+public static CONSTRAINT_MAX: int32 = 5
+public static CONSTRAINT_FILL: int32 = 6
+
+public struct Constraint {
+    kind: int32
+    val: int32
+    num: int32
+    den: int32
+}
+
+public fun constraint_length(val: int32) -> Constraint {
+    return Constraint { kind: CONSTRAINT_LENGTH, val: val, num: 0, den: 1 }
+}
+
+public fun constraint_percentage(pct: int32) -> Constraint {
+    return Constraint { kind: CONSTRAINT_PERCENTAGE, val: pct, num: 0, den: 1 }
+}
+
+public fun constraint_ratio(num: int32, den: int32) -> Constraint {
+    return Constraint { kind: CONSTRAINT_RATIO, val: 0, num: num, den: if den > 0 { den } else { cast(1, "int32") } }
+}
+
+public fun constraint_min(val: int32) -> Constraint {
+    return Constraint { kind: CONSTRAINT_MIN, val: val, num: 0, den: 1 }
+}
+
+public fun constraint_max(val: int32) -> Constraint {
+    return Constraint { kind: CONSTRAINT_MAX, val: val, num: 0, den: 1 }
+}
+
+public fun constraint_fill(weight: int32 = 1) -> Constraint {
+    return Constraint { kind: CONSTRAINT_FILL, val: if weight > 0 { weight } else { cast(1, "int32") }, num: 0, den: 1 }
+}
+
+public fun solve_constraints(total: int32, ref constraints: Constraint[]) -> int32[] {
+    set res: int32[] = []
+    set count = cast(constraints.len(), "int32")
+
+    if count == 0 { return res }
+    
+    for i in 0..count { res.push(0) }
+
+    set fixed_used: int32 = 0
+    set total_fill_weight: int32 = 0
+
+
+    for i in 0..count {
+        set c = constraints[i]
+        if c.kind == CONSTRAINT_LENGTH {
+            rewrite res[i] = c.val
+            rewrite fixed_used = fixed_used + c.val
+        } elif c.kind == CONSTRAINT_PERCENTAGE {
+            set sz = (total * c.val) / 100
+            rewrite res[i] = sz
+            rewrite fixed_used = fixed_used + sz
+        } elif c.kind == CONSTRAINT_RATIO {
+            set sz = (total * c.num) / c.den
+            rewrite res[i] = sz
+            rewrite fixed_used = fixed_used + sz
+        } elif c.kind == CONSTRAINT_FILL {
+            rewrite total_fill_weight = total_fill_weight + c.val
+        } elif c.kind == CONSTRAINT_MIN {
+            rewrite res[i] = c.val
+            rewrite fixed_used = fixed_used + c.val
+        } elif c.kind == CONSTRAINT_MAX {
+            set sz: int32 = if total < c.val { total } else { c.val }
+            rewrite res[i] = sz
+            rewrite fixed_used = fixed_used + sz
+        }
+    }
+
+    set remain = total - fixed_used
+    if remain < 0 { rewrite remain = 0 }
+    if total_fill_weight > 0 && remain > 0 {
+        set space_rem = remain
+        set weight_rem = total_fill_weight
+        for i in 0..count {
+            set c = constraints[i]
+            if c.kind == CONSTRAINT_FILL {
+                set allocated = (space_rem * c.val) / weight_rem
+                rewrite res[i] = allocated
+                rewrite space_rem = space_rem - allocated
+                rewrite weight_rem = weight_rem - c.val
+            }
+        }
+    }
+
+    return res
+}
+
+public fun layout_split_horizontal(bounds: Rect, ref constraints: Constraint[], gap: int32 = 0) -> Rect[] {
+    set rects: Rect[] = []
+    set count = cast(constraints.len(), "int32")
+    if count == 0 || bounds.width <= 0 || bounds.height <= 0 { return rects }
+    set total_gaps: int32 = if count > 1 { gap * (count - 1) } else { cast(0, "int32") }
+    set avail_w = bounds.width - total_gaps
+    if avail_w < 0 { rewrite avail_w = 0 }
+    set sizes = solve_constraints(avail_w, ref constraints)
+    set cur_x = bounds.x
+    for i in 0..sizes.len() {
+        set w = sizes[i]
+        rects.push(init_rect(cur_x, bounds.y, w, bounds.height))
+        rewrite cur_x = cur_x + w + gap
+    }
+    return rects
+}
+
+public fun layout_split_vertical(bounds: Rect, ref constraints: Constraint[], gap: int32 = 0) -> Rect[] {
+    set rects: Rect[] = []
+    set count = cast(constraints.len(), "int32")
+    if count == 0 || bounds.width <= 0 || bounds.height <= 0 { return rects }
+    set total_gaps: int32 = if count > 1 { gap * (count - 1) } else { cast(0, "int32") }
+    set avail_h = bounds.height - total_gaps
+    if avail_h < 0 { rewrite avail_h = 0 }
+    set sizes = solve_constraints(avail_h, ref constraints)
+    set cur_y = bounds.y
+    for i in 0..sizes.len() {
+        set h = sizes[i]
+        rects.push(init_rect(bounds.x, cur_y, bounds.width, h))
+        rewrite cur_y = cur_y + h + gap
+    }
+    return rects
+}

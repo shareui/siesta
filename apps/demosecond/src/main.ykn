@@ -1,0 +1,72 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.io: terminal_size
+load std.itermtool.event: poll_event, try_read_event, Event, EVENT_KEY, EVENT_MOUSE
+load std.itermtool.key: KeyEvent, KEY_ESC, KEY_CHAR
+load std.itermtool.mouse: MouseEvent
+load siesta: SiestaApp, log_init, log_debug
+load .views: DemoSecondCoordinator
+
+fun main() {
+    log_init("log.txt")
+    log_debug("[main] starting demosecond application")
+
+    set sz = terminal_size()
+    set w: int32 = if sz.0 > 40 { sz.0 } else { cast(100, "int32") }
+    set h: int32 = if sz.1 > 15 { sz.1 } else { cast(30, "int32") }
+    log_debug("[main] terminal size: (" + cast(w, "string") + "x" + cast(h, "string") + ")")
+
+    set app = init SiestaApp(w, h)
+    set coordinator = init DemoSecondCoordinator()
+
+    app.init_terminal()
+    log_debug("[main] terminal initialized")
+
+    // initial draw
+    app.double_buf.back_buffer.clear()
+    coordinator.draw(ref app.double_buf.back_buffer)
+    set initial_flushed = app.double_buf.diff_and_flush()
+    log_debug("[main] initial frame flushed: " + cast(initial_flushed, "string"))
+
+    while region app.is_running {
+        set resized = app.check_resize()
+        if resized {
+            log_debug("[main] terminal resized to (" + cast(app.width, "string") + "x" + cast(app.height, "string") + ")")
+        }
+        set has_event = poll_event(16)
+        if has_event {
+            set ev = try_read_event()
+            if ev != null {
+                set e = ev ?? init Event(0)
+                if e.kind == EVENT_KEY && e.key != null {
+                    set k = e.key ?? init KeyEvent(0, "")
+                    log_debug("[main] key: " + k.to_string() + " char='" + k.char_val + "' ctrl=" + (if k.ctrl { "true" } else { "false" }))
+
+                    // global quit shortcuts
+                    if k.ctrl && (k.char_val == "q" || k.char_val == "Q" || k.code == 113 || k.code == 17) {
+                        log_debug("[main] Ctrl+Q received, exiting")
+                        break
+                    }
+                    if !coordinator.show_help && ((k.code == KEY_CHAR && (k.char_val == "q" || k.char_val == "Q")) || k.code == KEY_ESC) {
+                        log_debug("[main] quit requested from active screen, exiting")
+                        break
+                    }
+
+                    set _ = coordinator.handle_key(k)
+                }
+            }
+        }
+
+        // render active frame
+        app.double_buf.back_buffer.clear()
+        coordinator.draw(ref app.double_buf.back_buffer)
+        set flushed = app.double_buf.diff_and_flush()
+        if flushed > 0 {
+            log_debug("[main] frame updated, cells changed: " + cast(flushed, "string"))
+        }
+    }
+
+    app.restore_terminal()
+    log_debug("[main] terminal restored, exiting demosecond successfully")
+}

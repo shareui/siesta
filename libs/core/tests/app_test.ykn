@@ -1,0 +1,157 @@
+#![lint::allow("unused_import")]
+
+load core.process: exit
+load core.utils: assert, cast
+load std.io: println
+load root.cell: Cell, init_cell
+load root.buffer: TerminalBuffer
+load root.app: LayoutContext, Screen, Dialog, SiestaApp
+load root.layout.scale: compute_scale_factor, resolve_active_breakpoint, matches_breakpoint_name, should_render_responsive
+
+class TestMainScreen extends Screen {
+    public fun init() {
+        super("TestMainScreen")
+        rewrite this.draw_fn = fun(ref buf: TerminalBuffer) {
+            buf.draw_text(2, 2, "Screen Content Loaded", "green", "black", true, false, false, false, false)
+        }
+    }
+}
+
+class TestModalDialog extends Dialog {
+    public fun init() {
+        super("Confirm", "Are you sure?", cast(30, "int32"), cast(8, "int32"), true, true)
+        rewrite this.draw_fn = fun(ref buf: TerminalBuffer) {
+            buf.draw_text(2, 2, "Dialog Content", "yellow", "black", false, false, false, false, false)
+        }
+    }
+}
+
+#[test]
+fun test_siesta_app_lifecycle_and_properties() {
+    set app = init SiestaApp(80, 24)
+    assert(app.width == 80)
+    assert(app.height == 24)
+    assert(app.scale == 1.0)
+    assert(app.locale == "en")
+    assert(app.is_running)
+
+    app.set_scale(1.5)
+    app.set_locale("ru")
+    assert(app.scale == 1.5)
+    assert(app.locale == "ru")
+
+    app.exit()
+    assert(!app.is_running)
+}
+
+#[test]
+fun test_siesta_app_screen_and_dialog_rendering() {
+    set app = init SiestaApp(60, 20)
+    set scr = init TestMainScreen()
+    app.mount_screen(scr)
+
+    set diff_count1 = app.render_frame()
+    assert(diff_count1 > 0)
+    set cell_scr = app.double_buf.front_buffer.get_cell(2, 2)
+    assert(cell_scr.ch == "S")
+
+    set dlg = init TestModalDialog()
+    app.show_dialog(dlg)
+    assert(app.active_dialog != null)
+
+    set diff_count2 = app.render_frame()
+    assert(diff_count2 > 0)
+
+    set center_x: int32 = cast((60 - 30) / 2, "int32")
+    set center_y: int32 = cast((20 - 8) / 2, "int32")
+    set border_cell = app.double_buf.front_buffer.get_cell(center_x, center_y)
+    assert(border_cell.ch.len() > 0)
+
+    app.close_dialog()
+    assert(app.active_dialog == null)
+
+    set diff_count3 = app.render_frame()
+    assert(diff_count3 > 0)
+}
+
+#[test]
+fun test_siesta_app_overlays() {
+    set app = init SiestaApp(60, 20)
+    set scr = init TestMainScreen()
+    app.mount_screen(scr)
+
+    set ov = init Screen("TestOverlay")
+    rewrite ov.draw_fn = fun(ref buf: TerminalBuffer) {
+        buf.draw_text(2, 2, "Overlay Top", "yellow", "black", false, false, false, false, false)
+    }
+    app.add_overlay(ov)
+    assert(app.overlays.len() == 1)
+
+    set _ = app.render_frame()
+    set cell = app.double_buf.front_buffer.get_cell(2, 2)
+    assert(cell.ch == "O")
+
+    set removed = app.remove_overlay("TestOverlay")
+    assert(removed)
+    assert(app.overlays.len() == 0)
+
+    set _ = app.render_frame()
+    set cell_base = app.double_buf.front_buffer.get_cell(2, 2)
+    assert(cell_base.ch == "S")
+}
+
+class ResizeAwareScreen extends Screen {
+    public resize_called: bool
+    public last_w: int32
+    public last_h: int32
+
+    public fun init() {
+        super("ResizeAwareScreen")
+        rewrite this.resize_called = false
+        rewrite this.last_w = 0
+        rewrite this.last_h = 0
+    }
+
+    public fun on_resize(w: int32, h: int32) {
+        rewrite this.resize_called = true
+        rewrite this.last_w = w
+        rewrite this.last_h = h
+    }
+}
+
+#[test]
+fun test_siesta_app_dynamic_resizing_and_breakpoints() {
+    set app = init SiestaApp(80, 24)
+    assert(app.breakpoint() == "compact")
+
+    set scr = init ResizeAwareScreen()
+    scr.on_resize(120, 35)
+    assert(scr.resize_called)
+    assert(scr.last_w == 120)
+    assert(scr.last_h == 35)
+    app.mount_screen(scr)
+
+    set factor = compute_scale_factor(120, 36, 80, 24)
+    assert(factor == 1.5)
+
+    assert(matches_breakpoint_name(60, "mobile"))
+    assert(matches_breakpoint_name(90, "compact"))
+    assert(matches_breakpoint_name(130, "desktop"))
+    assert(matches_breakpoint_name(130, "compact+"))
+
+    assert(should_render_responsive(100, 30, 80, 20, 0, 0))
+    assert(!should_render_responsive(70, 30, 80, 20, 0, 0))
+    assert(!should_render_responsive(100, 15, 80, 20, 0, 0))
+
+    app.resize(140, 40)
+    assert(app.width == 140)
+    assert(app.height == 40)
+    assert(app.double_buf.width == 140)
+    assert(app.double_buf.height == 40)
+    assert(app.breakpoint() == "desktop")
+
+    app.resize(60, 20)
+    assert(app.width == 60)
+    assert(app.height == 20)
+    assert(app.breakpoint() == "mobile")
+}

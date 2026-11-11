@@ -1,0 +1,443 @@
+load core.utils: assert, cast
+load std.fs.files: file_read_text, file_write_text, file_exists, file_remove
+load std.fs.dirs: dir_create, dir_remove_all, dir_exists
+load std.fs.paths: path_join
+load std.io: println
+load root.lexer: SpesLexer
+load root.parser: SpesParser
+load root.locales: parse_locales_toml
+load root.graph: ModuleGraph
+load root.typecheck: validate_widget_tree
+load root.semantic: SemanticAnalyzer
+load root.errors: SiestaError, siesta_error, format_siesta_error
+load root.ast: init_widget_node, WidgetProp
+load root.codegen: SpesCodegen
+load root.importer: resolve_module_imports, find_module_file, build_registry_from_dirs
+load std.strings: contains
+
+#[test]
+fun test_lexer_tokens() {
+    set src = "extern app-views\ntheme nordDark {\n  bg: #2e3440\n  delay: 200ms\n  title: tr\"app.title\"\n}"
+    set lex = init SpesLexer(src)
+
+    set t1 = lex.next_token()
+    assert(t1.kind == "extern")
+
+    set t2 = lex.next_token()
+    assert(t2.kind == "IDENT")
+    assert(t2.value == "app-views")
+
+    set t3 = lex.next_token()
+    assert(t3.kind == "theme")
+
+    set t4 = lex.next_token()
+    assert(t4.value == "nordDark")
+}
+
+#[test]
+fun test_parser_module() {
+    set src = "extern demo-view\nuse common-widgets(*)\ntheme darkAdaptive adaptive {\n  bg: default\n  accent: #88c0d0\n}\ncomponent userCard(name: string, active: bool = true) {\n  state {\n    selected: bool = false\n  }\n  row(gap: 1) {\n    text(name) {\n      bold: true\n    }\n  }\n}\nscreen mainScreen {\n  col(fill: true) {\n    text(\"Hello World\")\n  }\n}\n"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+
+    assert(module_def.module_id == "demo-view")
+    assert(module_def.imports.len() == 1)
+    assert(module_def.imports[0].module_id == "common-widgets")
+    assert(module_def.imports[0].is_wildcard == true)
+    assert(module_def.themes.len() == 1)
+    assert(module_def.themes[0].name == "darkAdaptive")
+    assert(module_def.themes[0].is_adaptive == true)
+    assert(module_def.components.len() == 1)
+    assert(module_def.components[0].name == "userCard")
+    assert(module_def.components[0].props.len() == 2)
+    assert(module_def.components[0].state_fields.len() == 1)
+    assert(module_def.screens.len() == 1)
+    assert(module_def.screens[0].name == "mainScreen")
+}
+
+#[test]
+fun test_locales_toml() {
+    set toml_content = "[app.title]\nru = \"Заголовок\"\nen = \"Title\"\n\n[auth.login]\nru = \"Войти\"\nen = \"Sign In\"\n\n[btn.only_fr]\nfr = \"Oui\"\n"
+    set catalog = parse_locales_toml(toml_content)
+
+    assert(catalog.has_key("app.title"))
+    assert(catalog.has_key("auth.login"))
+    assert(catalog.get_translation("app.title", "ru") == "Заголовок")
+    assert(catalog.get_translation("app.title", "en") == "Title")
+    assert(catalog.get_translation("auth.login", "ru") == "Войти")
+    assert(catalog.get_translation("auth.login", "en") == "Sign In")
+    assert(catalog.get_translation("non.existent", "ru") == null)
+
+    assert(catalog.resolve_text("app.title", "ru") == "Заголовок")
+    assert(catalog.resolve_text("app.title", "en") == "Title")
+    assert(catalog.resolve_text("app.title", "de") == "Title")
+    assert(catalog.resolve_text("btn.only_fr", "de") == "btn.only_fr")
+    assert(catalog.resolve_text("unknown.key", "en") == "unknown.key")
+}
+
+#[test]
+fun test_graph_cycles() {
+    set src_a = "extern mod-a\nuse mod-b\nscreen screenA { col { text(\"A\") } }"
+    set src_b = "extern mod-b\nuse mod-a\nscreen screenB { col { text(\"B\") } }"
+
+    set parser_a = init SpesParser(src_a)
+    set mod_a = parser_a.parse_module()
+    set parser_b = init SpesParser(src_b)
+    set mod_b = parser_b.parse_module()
+
+    set graph = init ModuleGraph()
+    graph.add_module(mod_a)
+    graph.add_module(mod_b)
+
+    set detected: bool = false
+    sus {
+        graph.detect_cycles()
+    } catch e: SiestaError {
+        rewrite detected = true
+    }
+    assert(detected)
+}
+
+#[test]
+fun test_property_typecheck() {
+    set valid_widget = init_widget_node("col")
+    valid_widget.props.push(WidgetProp { key: "gap", val: "2" })
+    valid_widget.props.push(WidgetProp { key: "fill", val: "true" })
+    validate_widget_tree(ref valid_widget)
+
+    set invalid_widget = init_widget_node("col")
+    invalid_widget.props.push(WidgetProp { key: "gap", val: "\"invalid_string\"" })
+    set failed: bool = false
+    sus {
+        validate_widget_tree(ref invalid_widget)
+    } catch e: SiestaError {
+        rewrite failed = true
+    }
+    assert(failed)
+}
+
+#[test]
+fun test_semantic_locale_warnings() {
+    set toml_content = "[app.title]\nru = \"Заголовок\"\n"
+    set catalog = parse_locales_toml(toml_content)
+
+    set langs: string[] = ["ru", "en"]
+    set analyzer = init SemanticAnalyzer("ru", catalog, langs)
+
+    set src = "extern view-loc\nscreen locScreen {\n  col {\n    text(tr\"app.title\")\n    text(tr\"missing.key\")\n  }\n}\n"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+
+    set result = analyzer.validate_module(module_def)
+    assert(result.warnings.len() >= 2)
+}
+
+#[test]
+fun test_codegen_themes_and_views() {
+    set src = "extern my-views\ntheme nordDark {\n  bgBase: #2e3440\n}\ncomponent userCard(username: string) {\n  state {\n    active: bool = true\n  }\n  col {\n    text(\"Card\")\n  }\n}\ndialog confirmDlg(title: string) {\n  modal: true\n  col {\n    text(\"Dlg\")\n  }\n}\nscreen homeScreen {\n  col {\n    text(\"Home\")\n  }\n}"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+
+    assert(contains(code, "public class NordDark {"))
+    assert(contains(code, "public class UserCard {"))
+    assert(contains(code, "public class ConfirmDlg extends Dialog {"))
+    assert(contains(code, "public class HomeScreen extends Screen {"))
+    assert(contains(code, "public class UiBundle {"))
+    assert(contains(code, "public fun build_layout(ref ctx: LayoutContext)"))
+    assert(contains(code, "public fun draw(ref buf: TerminalBuffer)"))
+}
+
+#[test]
+fun test_codegen_translations() {
+    set toml_content = "[app.title]\nru = \"Заголовок\"\nen = \"Title\"\n\n[btn.only_fr]\nfr = \"Oui\"\n"
+    set catalog = parse_locales_toml(toml_content)
+
+    set codegen = init SpesCodegen("en")
+    set trans_code = codegen.generate_translations(catalog)
+
+    assert(contains(trans_code, "public fun get_translation(key: string, lang: string = \"en\") -> string"))
+    assert(contains(trans_code, "if key == \"app.title\" {"))
+    assert(contains(trans_code, "if lang == \"ru\" { return \"Заголовок\" }"))
+    assert(contains(trans_code, "if lang == \"en\" { return \"Title\" }"))
+    assert(contains(trans_code, "return \"Title\""))
+    assert(contains(trans_code, "if key == \"btn.only_fr\" {"))
+    assert(contains(trans_code, "return \"btn.only_fr\""))
+}
+
+#[test]
+fun test_error_formatting() {
+    set err1 = siesta_error("expected ';', got '}'", 12, 5, 102, "syntax")
+    set fmt1 = format_siesta_error(err1)
+    assert(fmt1 == "siesta spes syntax error[12|5]: expected ';', got '}'")
+
+    set err2 = siesta_error("property 'gap' in widget 'col' expects int32, got: \"foo\"", 8, 3, 120, "semantic")
+    set fmt2 = format_siesta_error(err2)
+    assert(fmt2 == "siesta spes semantic error[8|3]: property 'gap' in widget 'col' expects int32, got: \"foo\"")
+}
+
+#[test]
+fun test_demo_views_spes_codegen() {
+    set toml_path: string = if file_exists("../../apps/demo/src/locales.toml") {
+        "../../apps/demo/src/locales.toml"
+    } else {
+        "apps/demo/src/locales.toml"
+    }
+    set toml_content = file_read_text(toml_path)
+    set catalog = parse_locales_toml(toml_content)
+    assert(catalog.has_key("editor.title"))
+    assert(catalog.has_key("controls.title"))
+    assert(catalog.get_translation("controls.title", "ru") == "Горячие клавиши и управление")
+    assert(catalog.get_translation("controls.title", "en") == "Hotkeys & Controls")
+    assert(catalog.get_translation("controls.close_hint", "ru") == "Нажмите [q] или [Esc], чтобы закрыть")
+
+    set spes_path: string = if file_exists("../../apps/demo/src/views.spes") {
+        "../../apps/demo/src/views.spes"
+    } else {
+        "apps/demo/src/views.spes"
+    }
+    set spes_content = file_read_text(spes_path)
+    set parser = init SpesParser(spes_content)
+    set module_def = parser.parse_module()
+    assert(module_def.dialogs.len() > 0)
+    assert(module_def.dialogs[0].size_w == 68)
+    assert(module_def.dialogs[0].size_h == 16)
+    set codegen = init SpesCodegen("en")
+    set gen_code = codegen.generate_module(module_def, catalog)
+    assert(gen_code.len() > 0)
+    assert(contains(gen_code, "public class EditorTheme {"))
+    assert(contains(gen_code, "public class ControlsDialog extends Dialog {"))
+    assert(contains(gen_code, "if lang == \"ru\" { return \"Горячие клавиши и управление\" }"))
+}
+
+#[test]
+fun test_codegen_responsive_props() {
+    set src = "extern resp-views\nscreen respScreen {\n  col {\n    block(minWidth: 90, title: \"WideOnly\") {\n      text(\"hello\")\n    }\n    block(hideBelow: 96, title: \"HiddenOnMobile\") {\n      text(\"telemetry\")\n    }\n    block(breakpoint: \"desktop\", title: \"DesktopOnly\") {\n      text(\"pro-mode\")\n    }\n    button(\"Action\", width: \"100%\")\n  }\n}\n"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+    assert(module_def.screens.len() == 1)
+
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+    assert(contains(code, "if buf.width >= cast(90, \"int32\") {"))
+    assert(contains(code, "if buf.width >= cast(96, \"int32\") {"))
+    assert(contains(code, "if buf.width >= cast(120, \"int32\") {"))
+    assert(contains(code, "buf.width"))
+}
+
+#[test]
+fun test_codegen_callbacks_and_binding() {
+    set src = "extern user-form\ncomponent userForm(title: string, onSave: fun()) {\n  state {\n    email: string = \"test@mail.org\"\n  }\n  col {\n    text(bind: title)\n    input(bind: email)\n    button(\"Save\", onClick: onSave) {\n      id: saveBtn\n    }\n  }\n}"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+
+    assert(module_def.components.len() == 1)
+    set comp = module_def.components[0]
+    assert(comp.props.len() == 2)
+    assert(comp.props[1].name == "onSave")
+    assert(comp.props[1].type_name == "fun()")
+    assert(comp.state_fields.len() == 1)
+    assert(comp.state_fields[0].name == "email")
+
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+
+    assert(contains(code, "public class UserForm {"))
+    assert(contains(code, "public title: string"))
+    assert(contains(code, "public onSave: fun()"))
+    assert(contains(code, "public email: string"))
+    assert(contains(code, "buf.draw_text(cast(0, \"int32\"), cast(0, \"int32\"), this.title, \"default\", \"default\""))
+    assert(contains(code, "buf.draw_text(cast(0, \"int32\"), cast(0, \"int32\"), \"[ \" + this.email + \" ]\", \"white\", \"#181825\""))
+    assert(contains(code, "buf.draw_text(cast(0, \"int32\"), cast(0, \"int32\"), \"[\" + \"Save\" + \"]\", \"cyan\", \"default\""))
+    assert(contains(code, "public fun set_title(val: string) {"))
+    assert(contains(code, "public fun get_title() -> string {"))
+    assert(contains(code, "public fun set_email(val: string) {"))
+    assert(contains(code, "public fun get_email() -> string {"))
+    assert(contains(code, "public fun update_state(key: string, val: string) {"))
+    assert(contains(code, "if key == \"title\" { rewrite this.title = val }"))
+    assert(contains(code, "if key == \"email\" { rewrite this.email = val }"))
+    assert(contains(code, "public fun trigger_onSave() {"))
+    assert(contains(code, "public fun trigger_event(event_name: string) {"))
+    assert(contains(code, "if event_name == \"onSave\""))
+    assert(contains(code, "if event_name == \"onClick\" || event_name == \"onSave\""))
+    assert(contains(code, "public fun click_widget(widget_id: string) {"))
+    assert(contains(code, "if widget_id == \"saveBtn\""))
+}
+
+#[test]
+fun test_shortcuts_and_widgets() {
+    set src = "extern custom-views\nscreen editorScreen {\n  shortcuts {\n    \"Ctrl+S\": onSave\n    \"F1\": onToggleControls\n    \"Tab\": onToggleFocus\n    \"Esc\": onCancel\n  }\n  col {\n    block(border: rounded, title: \"My Editor\", titleAlign: center) {\n      paragraph(wrap: word)\n      gauge(percent: 50.0)\n      sparkline(max: 100)\n      barchart(max: 50)\n      scrollbar(total: 100)\n    }\n  }\n}"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+    assert(module_def.screens.len() == 1)
+    set scr = module_def.screens[0]
+    assert(scr.shortcuts.len() == 4)
+    assert(scr.shortcuts[0].key_combo == "Ctrl+S")
+    assert(scr.shortcuts[0].action_name == "onSave")
+
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+    assert(contains(code, "public class EditorScreen extends Screen {"))
+    assert(contains(code, "public fun handle_key(key: KeyEvent) -> bool {"))
+    assert(contains(code, "key.ctrl"))
+    assert(contains(code, "KEY_F1"))
+    assert(contains(code, "KEY_TAB"))
+    assert(contains(code, "KEY_ESC"))
+    assert(contains(code, "BlockWidget"))
+    assert(contains(code, "ParagraphWidget"))
+    assert(contains(code, "GaugeWidget"))
+    assert(contains(code, "SparklineWidget"))
+    assert(contains(code, "BarChartWidget"))
+    assert(contains(code, "ScrollbarWidget"))
+}
+
+#[test]
+fun test_import_resolution() {
+    set test_dir = "temp_dir_import_res"
+    if dir_exists(test_dir) {
+        dir_remove_all(test_dir)
+    }
+    set _d = dir_create(test_dir)
+    set tmp_child = path_join(test_dir, "temp_child_test.spes")
+    set tmp_main = path_join(test_dir, "temp_main_test.spes")
+    set _w1 = file_write_text(tmp_child, "extern child-view\nscreen childScreen {\n  col {\n    text(\"Hello From Child\")\n  }\n}\n")
+    set _w2 = file_write_text(tmp_main, "extern main-view\nuse child-view(*)\nscreen parentScreen {\n  col {\n    text(\"Parent\")\n  }\n}\n")
+
+    set parser = init SpesParser(file_read_text(tmp_main))
+    set module_def = parser.parse_module()
+    assert(module_def.screens.len() == 1)
+
+    set in_stack: string[] = []
+    set tracked: string[] = []
+    resolve_module_imports(ref module_def, tmp_main, test_dir, ref in_stack, ref tracked)
+
+    assert(module_def.screens.len() == 2)
+    assert(module_def.screens[0].name == "parentScreen")
+    assert(module_def.screens[1].name == "childScreen")
+    assert(tracked.len() == 1)
+
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+    assert(contains(code, "public class ParentScreen extends Screen {"))
+    assert(contains(code, "public class ChildScreen extends Screen {"))
+
+    dir_remove_all(test_dir)
+}
+
+#[test]
+fun test_codegen_new_widgets() {
+    set src = "extern widgets-view\nscreen advScreen {\n  col {\n    textarea(showLineNumbers: true) {\n      anim: pulse\n    }\n    list(visibleRows: 8)\n    radio(vertical: true)\n    table\n    progress(value: 75, showPercentage: true)\n  }\n}"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+
+    assert(contains(code, "TextAreaWidget"))
+    assert(contains(code, "ListWidget"))
+    assert(contains(code, "RadioGroupWidget"))
+    assert(contains(code, "TableWidget"))
+    assert(contains(code, "ProgressWidget"))
+    assert(contains(code, "layout_col"))
+    assert(contains(code, "this.layout_rects"))
+    assert(contains(code, "anim_frame"))
+}
+
+#[test]
+fun test_codegen_dialog_widgets() {
+    set src = "extern dlg-view\ndialog confirmDlg(title: string = \"Confirm\") {\n  modal: true\n  paragraph(\"Are you sure?\")\n  input(placeholder: \"Type yes\")\n  checkbox(\"Remember\", checked: true)\n  progress(value: 50)\n  gauge(percent: 0.5)\n  button(\"OK\")\n}"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+
+    assert(contains(code, "public class ConfirmDlg extends Dialog {"))
+    assert(contains(code, "inp_disp"))
+    assert(contains(code, "[x]"))
+    assert(contains(code, "ProgressWidget"))
+    assert(contains(code, "GaugeWidget"))
+    assert(contains(code, "Are you sure?"))
+}
+
+#[test]
+fun test_codegen_adaptive_theme() {
+    set src = "extern theme-view\ntheme myTheme adaptive {\n  bg: #1e1e2e\n  fg: #cdd6f4\n  accent: #89b4fa\n}\nscreen dummyScreen {\n  col { text(\"Hi\") }\n}"
+    set parser = init SpesParser(src)
+    set module_def = parser.parse_module()
+    set codegen = init SpesCodegen("en")
+    set code = codegen.generate_module(module_def, null)
+
+    assert(contains(code, "public class MyTheme {"))
+    assert(contains(code, "public is_adaptive: bool"))
+    assert(contains(code, "this.adapt_to_terminal(detect_is_dark_mode())"))
+    assert(contains(code, "public fun adapt_to_terminal(is_dark: bool) {"))
+}
+
+#[test]
+fun test_arbitrary_case_extern() {
+    set src1 = "extern myCamelCaseView\nscreen s1 { col { text(\"1\") } }"
+    set p1 = init SpesParser(src1)
+    set m1 = p1.parse_module()
+    assert(m1.module_id == "myCamelCaseView")
+
+    set src2 = "extern my_snake_case_view\nscreen s2 { col { text(\"2\") } }"
+    set p2 = init SpesParser(src2)
+    set m2 = p2.parse_module()
+    assert(m2.module_id == "my_snake_case_view")
+
+    set src3 = "extern PascalCaseView\nscreen s3 { col { text(\"3\") } }"
+    set p3 = init SpesParser(src3)
+    set m3 = p3.parse_module()
+    assert(m3.module_id == "PascalCaseView")
+}
+
+#[test]
+fun test_duplicate_extern_collision() {
+    set test_dir = "temp_dir_collision"
+    if dir_exists(test_dir) {
+        dir_remove_all(test_dir)
+    }
+    set _d = dir_create(test_dir)
+    set f1 = path_join(test_dir, "temp_dup1.spes")
+    set f2 = path_join(test_dir, "temp_dup2.spes")
+    set _w1 = file_write_text(f1, "extern sharedId\nscreen scr1 { col { text(\"1\") } }")
+    set _w2 = file_write_text(f2, "extern sharedId\nscreen scr2 { col { text(\"2\") } }")
+
+    set caught = false
+    sus {
+        set dirs: string[] = [test_dir]
+        set _reg = build_registry_from_dirs(dirs)
+    } catch e: SiestaError {
+        rewrite caught = true
+        assert(contains(e.message, "conflicting module identifier 'sharedId'"))
+    }
+    dir_remove_all(test_dir)
+    assert(caught)
+}
+
+#[test]
+fun test_import_by_extern_with_different_filename() {
+    set test_dir = "temp_dir_diff_name"
+    if dir_exists(test_dir) {
+        dir_remove_all(test_dir)
+    }
+    set _d = dir_create(test_dir)
+    set custom_file = path_join(test_dir, "completely_unrelated_name_xyz.spes")
+    set main_file = path_join(test_dir, "my_entrypoint.spes")
+    set _w1 = file_write_text(custom_file, "extern userTelemetryView\nscreen telemetryScreen {\n  col {\n    text(\"Telemetry Data\")\n  }\n}\n")
+    set _w2 = file_write_text(main_file, "extern appRootView\nuse userTelemetryView(*)\nscreen appScreen {\n  col {\n    text(\"App\")\n  }\n}\n")
+
+    set parser = init SpesParser(file_read_text(main_file))
+    set module_def = parser.parse_module()
+
+    set in_stack: string[] = []
+    set tracked: string[] = []
+    resolve_module_imports(ref module_def, main_file, test_dir, ref in_stack, ref tracked)
+
+    assert(module_def.screens.len() == 2)
+    assert(module_def.screens[0].name == "appScreen")
+    assert(module_def.screens[1].name == "telemetryScreen")
+
+    dir_remove_all(test_dir)
+}

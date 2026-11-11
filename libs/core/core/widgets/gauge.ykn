@@ -1,0 +1,121 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+load ..layout.rect: Rect
+load .progress: fractional_block
+
+public class GaugeWidget {
+    public percent: float64
+    public label: string
+    public show_label: bool
+    public filled_fg: string
+    public filled_bg: string
+    public unfilled_fg: string
+    public unfilled_bg: string
+
+    public fun init(
+        percent: float64 = 0.0,
+        label: string = "",
+        show_label: bool = true,
+        filled_fg: string = "green",
+        filled_bg: string = "default",
+        unfilled_fg: string = "default",
+        unfilled_bg: string = "default"
+    ) {
+        rewrite this.percent = percent
+        rewrite this.label = label
+        rewrite this.show_label = show_label
+        rewrite this.filled_fg = filled_fg
+        rewrite this.filled_bg = filled_bg
+        rewrite this.unfilled_fg = unfilled_fg
+        rewrite this.unfilled_bg = unfilled_bg
+    }
+
+    public fun set_percent(p: float64) {
+        rewrite this.percent = p
+    }
+
+    public fun render(ref buf: TerminalBuffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return
+        }
+
+        set clamped = this.percent
+        if clamped < 0.0 { rewrite clamped = 0.0 }
+        if clamped > 100.0 { rewrite clamped = 100.0 }
+
+        set total_steps = area.width * 8
+        set cur_steps = cast(clamped * cast(total_steps, "float64") / 100.0, "int32")
+        set full_cols = cur_steps / 8
+        set rem = cur_steps % 8
+        set eff_unfilled_bg: string = if this.unfilled_bg != "default" { this.unfilled_bg } else { this.filled_bg }
+
+        for row in 0..area.height {
+            set cy = area.y + cast(row, "int32")
+            for col in 0..area.width {
+                set cx = area.x + cast(col, "int32")
+                set ci = cast(col, "int32")
+                if ci < full_cols {
+                    buf.draw_text(cx, cy, "█", this.filled_fg, this.filled_bg, false, false, false, false, false)
+                } elif ci == full_cols && rem > 0 {
+                    set frac = fractional_block(rem)
+                    buf.draw_text(cx, cy, frac, this.filled_fg, eff_unfilled_bg, false, false, false, false, false)
+                } else {
+                    buf.draw_text(cx, cy, "░", this.unfilled_fg, eff_unfilled_bg, false, false, false, false, false)
+                }
+            }
+        }
+
+        // draw center label if requested
+        if this.show_label {
+            set pct_text: string = if this.label.len() > 0 { this.label } else { cast(cast(clamped, "int32"), "string") + "%" }
+            set text_len = cast(pct_text.len(), "int32")
+            if text_len <= area.width {
+                set lx = area.x + (area.width - text_len) / 2
+                set ly = area.y + area.height / 2
+                set eff_lbl_bg: string = if this.filled_bg != "default" { this.filled_bg } else { "default" }
+                buf.draw_text(lx, ly, pct_text, "white", eff_lbl_bg, true, false, false, false, false)
+            }
+        }
+    }
+}
+
+public class LineGaugeWidget {
+    public ratio: float64
+    public label: string
+    public fg: string
+    public bg: string
+
+    public fun init(ratio: float64 = 0.0, label: string = "", fg: string = "cyan", bg: string = "default") {
+        rewrite this.ratio = ratio
+        rewrite this.label = label
+        rewrite this.fg = fg
+        rewrite this.bg = bg
+    }
+
+    public fun render(ref buf: TerminalBuffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 { return }
+
+        set clamped = this.ratio
+        if clamped < 0.0 { rewrite clamped = 0.0 }
+        if clamped > 1.0 { rewrite clamped = 1.0 }
+
+        set filled_w = cast(clamped * cast(area.width, "float64"), "int32")
+        set cy = area.y
+
+        for col in 0..area.width {
+            set cx = area.x + cast(col, "int32")
+            set ci = cast(col, "int32")
+            if ci < filled_w {
+                buf.draw_text(cx, cy, "━", this.fg, this.bg, true, false, false, false, false)
+            } else {
+                buf.draw_text(cx, cy, "─", "default", this.bg, false, false, false, false, false)
+            }
+        }
+
+        if this.label.len() > 0 && cast(this.label.len(), "int32") + 2 < area.width {
+            buf.draw_text(area.x + 1, cy, " " + this.label + " ", "white", this.bg, true, false, false, false, false)
+        }
+    }
+}

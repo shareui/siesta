@@ -1,0 +1,223 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+load ..layout.rect: Rect, init_rect, rect_inner
+
+public static BORDER_NONE: int32 = 0
+public static BORDER_PLAIN: int32 = 1
+public static BORDER_ROUNDED: int32 = 2
+public static BORDER_DOUBLE: int32 = 3
+public static BORDER_THICK: int32 = 4
+public static BORDER_ASCII: int32 = 5
+
+public static ALIGN_LEFT: int32 = 0
+public static ALIGN_CENTER: int32 = 1
+public static ALIGN_RIGHT: int32 = 2
+
+public class BlockWidget {
+    public border_type: int32
+    public title: string
+    public title_align: int32
+    public title_fg: string
+    public title_bg: string
+    public title_bold: bool
+    public bottom_title: string
+    public bottom_title_align: int32
+    public bottom_title_fg: string
+    public border_fg: string
+    public border_bg: string
+    public bg: string
+    public fill_bg: bool
+    public pad_top: int32
+    public pad_bottom: int32
+    public pad_left: int32
+    public pad_right: int32
+
+    public fun init(
+        border_type: int32 = 1,
+        title: string = "",
+        title_align: int32 = 0,
+        title_fg: string = "default",
+        title_bg: string = "default",
+        title_bold: bool = false,
+        bottom_title: string = "",
+        bottom_title_align: int32 = 0,
+        bottom_title_fg: string = "default",
+        border_fg: string = "default",
+        border_bg: string = "default",
+        bg: string = "default",
+        fill_bg: bool = false,
+        pad_top: int32 = 0,
+        pad_bottom: int32 = 0,
+        pad_left: int32 = 0,
+        pad_right: int32 = 0
+    ) {
+        rewrite this.border_type = border_type
+        rewrite this.title = title
+        rewrite this.title_align = title_align
+        rewrite this.title_fg = title_fg
+        rewrite this.title_bg = title_bg
+        rewrite this.title_bold = title_bold
+        rewrite this.bottom_title = bottom_title
+        rewrite this.bottom_title_align = bottom_title_align
+        rewrite this.bottom_title_fg = bottom_title_fg
+        rewrite this.border_fg = border_fg
+        rewrite this.border_bg = border_bg
+        rewrite this.bg = bg
+        rewrite this.fill_bg = fill_bg
+        rewrite this.pad_top = pad_top
+        rewrite this.pad_bottom = pad_bottom
+        rewrite this.pad_left = pad_left
+        rewrite this.pad_right = pad_right
+    }
+
+    public fun inner(ref bounds: Rect) -> Rect {
+        set border_inset: int32 = if this.border_type == BORDER_NONE { cast(0, "int32") } else { cast(1, "int32") }
+        set top = border_inset + this.pad_top
+        set bottom = border_inset + this.pad_bottom
+        set left = border_inset + this.pad_left
+        set right = border_inset + this.pad_right
+        return rect_inner(ref bounds, top, bottom, left, right)
+    }
+
+    public fun render(ref buf: TerminalBuffer, ref bounds: Rect) {
+        if bounds.width <= 0 || bounds.height <= 0 {
+            return
+        }
+
+        // background fill if configured
+        if this.fill_bg || this.bg != "default" {
+            for r in 0..bounds.height {
+                set cy = bounds.y + cast(r, "int32")
+                for c in 0..bounds.width {
+                    set cx = bounds.x + cast(c, "int32")
+                    buf.draw_text(cx, cy, " ", "default", this.bg, false, false, false, false, false)
+                }
+            }
+        }
+
+        if this.border_type == BORDER_NONE {
+            return
+        }
+
+        // border symbols
+        set tl = "┌"
+        set tr = "┐"
+        set bl = "└"
+        set br = "┘"
+        set horiz = "─"
+        set vert = "│"
+
+        if this.border_type == BORDER_ROUNDED {
+            rewrite tl = "╭"
+            rewrite tr = "╮"
+            rewrite bl = "╰"
+            rewrite br = "╯"
+        } elif this.border_type == BORDER_DOUBLE {
+            rewrite tl = "╔"
+            rewrite tr = "╗"
+            rewrite bl = "╚"
+            rewrite br = "╝"
+            rewrite horiz = "═"
+            rewrite vert = "║"
+        } elif this.border_type == BORDER_THICK {
+            rewrite tl = "┏"
+            rewrite tr = "┓"
+            rewrite bl = "┗"
+            rewrite br = "┛"
+            rewrite horiz = "━"
+            rewrite vert = "┃"
+        } elif this.border_type == BORDER_ASCII {
+            rewrite tl = "+"
+            rewrite tr = "+"
+            rewrite bl = "+"
+            rewrite br = "+"
+            rewrite horiz = "-"
+            rewrite vert = "|"
+        }
+
+        set x = bounds.x
+        set y = bounds.y
+        set w = bounds.width
+        set h = bounds.height
+        set eff_border_bg: string = if this.border_bg != "default" { this.border_bg } else { this.bg }
+
+        // corners
+        buf.draw_text(x, y, tl, this.border_fg, eff_border_bg, false, false, false, false, false)
+        if w > 1 {
+            buf.draw_text(x + w - 1, y, tr, this.border_fg, eff_border_bg, false, false, false, false, false)
+        }
+        if h > 1 {
+            buf.draw_text(x, y + h - 1, bl, this.border_fg, eff_border_bg, false, false, false, false, false)
+            if w > 1 {
+                buf.draw_text(x + w - 1, y + h - 1, br, this.border_fg, eff_border_bg, false, false, false, false, false)
+            }
+        }
+
+        // horizontal borders
+        if w > 2 {
+            for col in 0..(w - 2) {
+                set cx = x + 1 + cast(col, "int32")
+                buf.draw_text(cx, y, horiz, this.border_fg, eff_border_bg, false, false, false, false, false)
+                if h > 1 {
+                    buf.draw_text(cx, y + h - 1, horiz, this.border_fg, eff_border_bg, false, false, false, false, false)
+                }
+            }
+        }
+
+        // vertical borders
+        if h > 2 {
+            for row in 0..(h - 2) {
+                set cy = y + 1 + cast(row, "int32")
+                buf.draw_text(x, cy, vert, this.border_fg, eff_border_bg, false, false, false, false, false)
+                if w > 1 {
+                    buf.draw_text(x + w - 1, cy, vert, this.border_fg, eff_border_bg, false, false, false, false, false)
+                }
+            }
+        }
+
+        // top title
+        if this.title.len() > 0 && w > 4 {
+            set title_badge = " " + this.title + " "
+            set tlen = cast(title_badge.len(), "int32")
+            if tlen > w - 2 {
+                set max_len = w - 4
+                if max_len > 0 {
+                    rewrite title_badge = " " + this.title[0..max_len] + " "
+                    rewrite tlen = cast(title_badge.len(), "int32")
+                }
+            }
+            set tx = x + 2
+            if this.title_align == ALIGN_CENTER {
+                rewrite tx = x + (w - tlen) / 2
+            } elif this.title_align == ALIGN_RIGHT {
+                rewrite tx = x + w - tlen - 2
+            }
+            if tx < x + 1 { rewrite tx = x + 1 }
+            set eff_title_bg: string = if this.title_bg != "default" { this.title_bg } else { eff_border_bg }
+            buf.draw_text(tx, y, title_badge, this.title_fg, eff_title_bg, this.title_bold, false, false, false, false)
+        }
+
+        // bottom title
+        if this.bottom_title.len() > 0 && h > 1 && w > 4 {
+            set b_badge = " " + this.bottom_title + " "
+            set blen = cast(b_badge.len(), "int32")
+            if blen > w - 2 {
+                set max_len = w - 4
+                if max_len > 0 {
+                    rewrite b_badge = " " + this.bottom_title[0..max_len] + " "
+                    rewrite blen = cast(b_badge.len(), "int32")
+                }
+            }
+            set bx = x + 2
+            if this.bottom_title_align == ALIGN_CENTER {
+                rewrite bx = x + (w - blen) / 2
+            } elif this.bottom_title_align == ALIGN_RIGHT {
+                rewrite bx = x + w - blen - 2
+            }
+            if bx < x + 1 { rewrite bx = x + 1 }
+            buf.draw_text(bx, y + h - 1, b_badge, this.bottom_title_fg, eff_border_bg, false, false, false, false, false)
+        }
+    }
+}

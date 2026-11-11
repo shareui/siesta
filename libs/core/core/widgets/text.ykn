@@ -1,0 +1,142 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.strings: split
+load ..buffer: TerminalBuffer
+
+public fun truncate_text(text: string, max_width: int32, mode: string = "ellipsis") -> string {
+    set len = cast(text.len(), "int32")
+    
+    if max_width <= 0 { return "" }
+    if len <= max_width { return text }
+
+    if mode == "clip" {
+        return text[0..cast(max_width, "int64")]
+    }
+    if max_width <= 3 {
+        return text[0..cast(max_width, "int64")]
+    }
+
+    set cut = cast(max_width - 3, "int64")
+    return text[0..cut] + "..."
+}
+
+public fun wrap_chars(text: string, max_width: int32) -> string[] {
+    set res: string[] = []
+    if max_width <= 0 || text.len() == 0 {
+        res.push(text)
+        return res
+    }
+    set step = cast(max_width, "int64")
+    set start: int64 = 0
+    while start < text.len() {
+        set end = start + step
+        if end > text.len() {
+            rewrite end = text.len()
+        }
+        res.push(text[start..end])
+        rewrite start = end
+    }
+    return res
+}
+
+public fun wrap_words(text: string, max_width: int32) -> string[] {
+    set res: string[] = []
+    if max_width <= 0 || text.len() == 0 {
+        res.push(text)
+        return res
+    }
+    set words_slice = split(text, " ")
+    set words: string[] = []
+    for wi in 0..words_slice.len() {
+        words.push(words_slice[wi])
+    }
+    set current_line: string = ""
+    for i in 0..words.len() {
+        set w = words[i]
+        if current_line.len() == 0 {
+            rewrite current_line = w
+        } else {
+            set candidate_len = cast(current_line.len() + 1 + w.len(), "int32")
+            if candidate_len <= max_width {
+                rewrite current_line = current_line + " " + w
+            } else {
+                res.push(current_line)
+                rewrite current_line = w
+            }
+        }
+    }
+    if current_line.len() > 0 {
+        res.push(current_line)
+    }
+    return res
+}
+
+public class TextWidget {
+    public content: string
+    public align: string
+    public wrap: string
+    public truncate: string
+    public bold: bool
+    public dim: bool
+    public italic: bool
+    public underline: bool
+    public reversed: bool
+    public fg: string
+    public bg: string
+
+    public fun init(content: string, align: string = "left", wrap: string = "none", 
+        truncate: string = "none", fg: string = "default", bg: string = "default", 
+        bold: bool = false, dim: bool = false, italic: bool = false, 
+        underline: bool = false, reversed: bool = false) {
+
+        rewrite this.content = content
+        rewrite this.align = align
+        rewrite this.wrap = wrap
+        rewrite this.truncate = truncate
+        rewrite this.fg = fg
+        rewrite this.bg = bg
+        rewrite this.bold = bold
+        rewrite this.dim = dim
+        rewrite this.italic = italic
+        rewrite this.underline = underline
+        rewrite this.reversed = reversed
+    }
+
+    public fun get_lines(max_width: int32) -> string[] {
+        if this.wrap == "word" {
+            return wrap_words(this.content, max_width)
+        }
+        if this.wrap == "char" {
+            return wrap_chars(this.content, max_width)
+        }
+        set res: string[] = []
+        if this.truncate == "ellipsis" || this.truncate == "clip" {
+            res.push(truncate_text(this.content, max_width, this.truncate))
+            return res
+        }
+        res.push(this.content)
+        return res
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, w: int32, h: int32) {
+        set lines = this.get_lines(w)
+        for i in 0..lines.len() {
+            set row_offset = cast(i, "int32")
+
+            if row_offset >= h { break }
+
+            set cur_line = lines[i]
+            set line_len = cast(cur_line.len(), "int32")
+            set start_x = x
+            if this.align == "center" && line_len < w {
+                rewrite start_x = x + (w - line_len) / 2
+            } else {
+                if this.align == "right" && line_len < w {
+                    rewrite start_x = x + (w - line_len)
+                }
+            }
+            buf.draw_text(start_x, y + row_offset, cur_line, this.fg, this.bg, this.bold, this.dim, this.italic, this.underline, this.reversed)
+        }
+    }
+}

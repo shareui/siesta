@@ -1,0 +1,51 @@
+public struct Rect {
+    x: int32
+    y: int32
+    width: int32
+    height: int32
+}
+
+public fun init_rect(x: int32 = 0, y: int32 = 0, width: int32 = 0, height: int32 = 0) -> Rect {
+    return Rect {
+        x: x,
+        y: y,
+        width: width,
+        height: height
+    }
+}
+
+public fun rects_equal(ref a: Rect, ref b: Rect) -> bool {
+    return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height
+}
+
+public fun rect_contains(r: Rect, x: int32, y: int32) -> bool {
+    return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
+public fun rect_inner(ref r: Rect, top: int32, bottom: int32, left: int32, right: int32) -> Rect {
+    set nw = r.width - left - right
+    set nh = r.height - top - bottom
+    set eff_w: int32 = if nw > 0 { nw } else { cast(0, "int32") }
+    set eff_h: int32 = if nh > 0 { nh } else { cast(0, "int32") }
+    return Rect {
+        x: r.x + left,
+        y: r.y + top,
+        width: eff_w,
+        height: eff_h
+    }
+}
+
+public fun rect_intersect(ref a: Rect, ref b: Rect) -> Rect {
+    set x1: int32 = if a.x > b.x { a.x } else { b.x }
+    set y1: int32 = if a.y > b.y { a.y } else { b.y }
+    set ax2 = a.x + a.width
+    set bx2 = b.x + b.width
+    set x2: int32 = if ax2 < bx2 { ax2 } else { bx2 }
+    set ay2 = a.y + a.height
+    set by2 = b.y + b.height
+    set y2: int32 = if ay2 < by2 { ay2 } else { by2 }
+    if x2 <= x1 || y2 <= y1 {
+        return init_rect(0, 0, 0, 0)
+    }
+    return init_rect(x1, y1, x2 - x1, y2 - y1)
+}

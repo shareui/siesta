@@ -1,0 +1,44 @@
+extern demosecond-res
+
+use overviewScreen(*)
+use formScreen(*)
+use dataScreen(*)
+use designScreen(*)
+
+theme showcaseTheme {
+  bg: #1e1e2e
+  fg: #cdd6f4
+  primary: #89b4fa
+  secondary: #a6e3a1
+  accent: #f9e2af
+  danger: #f38ba8
+  surface: #181825
+  surface2: #313244
+  muted: #585b70
+  headerBg: #11111b
+  headerFg: #cdd6f4
+  statusBg: #11111b
+  statusFg: #bac2de
+}
+
+dialog helpDialog(title: string = "Siesta Navigation & Hotkeys") {
+  modal: true
+  dimBackdrop: true
+  width: 66
+  height: 15
+  shortcuts {
+    "Esc": onClose
+    "q": onClose
+  }
+  col {
+    text("[ Siesta Navigation & Hotkeys Reference ]")
+    text("  z       : Switch to previous screen")
+    text("  x       : Switch to next screen")
+    text("  ?       : Toggle this help dialog")
+    text("  q / Esc : Close help / Quit application")
+    text("  Declarative UI driven entirely by .spes specification")
+    text("  Zero procedural layout code in application layer")
+    divider
+    text("Press Esc or q to dismiss this dialog")
+  }
+}

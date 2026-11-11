@@ -1,0 +1,219 @@
+#![lint::allow("unused_import")]
+
+load core.mem: region_used
+load core.utils: assert, cast
+load root.views: DemoSecondCoordinator, ShowcaseTheme, OverviewScreen, FormScreen, DataScreen, DesignScreen, HelpDialog
+load siesta: TerminalBuffer, DoubleBuffer
+load std.io: println
+load std.itermtool.key: KeyEvent, KEY_CHAR, KEY_ESC
+
+#[test]
+fun test_coordinator_initialization() {
+    set coordinator = init DemoSecondCoordinator()
+    assert(coordinator.screen_idx == 0)
+    assert(!coordinator.show_help)
+
+    set theme = init ShowcaseTheme()
+    assert(theme.bg == "#1e1e2e")
+    assert(theme.fg == "#cdd6f4")
+    assert(theme.primary == "#89b4fa")
+    assert(theme.secondary == "#a6e3a1")
+}
+
+#[test]
+fun test_screen_navigation_zx() {
+    set coordinator = init DemoSecondCoordinator()
+    assert(coordinator.screen_idx == 0)
+
+    // navigate forward using 'x'
+    set handled_x1 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "x"))
+    assert(handled_x1)
+    assert(coordinator.screen_idx == 1)
+
+    set handled_x2 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "x"))
+    assert(handled_x2)
+    assert(coordinator.screen_idx == 2)
+
+    set handled_x3 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "x"))
+    assert(handled_x3)
+    assert(coordinator.screen_idx == 3)
+
+    // wrap around to 0
+    set handled_x4 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "x"))
+    assert(handled_x4)
+    assert(coordinator.screen_idx == 0)
+
+    // navigate backward using 'z'
+    set handled_z1 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "z"))
+    assert(handled_z1)
+    assert(coordinator.screen_idx == 3)
+
+    set handled_z2 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "z"))
+    assert(handled_z2)
+    assert(coordinator.screen_idx == 2)
+
+    set handled_z3 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "z"))
+    assert(handled_z3)
+    assert(coordinator.screen_idx == 1)
+
+    set handled_z4 = coordinator.handle_key(init KeyEvent(KEY_CHAR, "z"))
+    assert(handled_z4)
+    assert(coordinator.screen_idx == 0)
+}
+
+#[test]
+fun test_help_dialog_toggle_and_dismiss() {
+    set coordinator = init DemoSecondCoordinator()
+    assert(!coordinator.show_help)
+
+    // open help dialog with '?'
+    set handled_help = coordinator.handle_key(init KeyEvent(KEY_CHAR, "?"))
+    assert(handled_help)
+    assert(coordinator.show_help)
+
+    // close help dialog with 'Esc'
+    set handled_esc = coordinator.handle_key(init KeyEvent(KEY_ESC, ""))
+    assert(handled_esc)
+    assert(!coordinator.show_help)
+
+    // open again with '?'
+    set _ = coordinator.handle_key(init KeyEvent(KEY_CHAR, "?"))
+    assert(coordinator.show_help)
+
+    // close with 'q'
+    set handled_q = coordinator.handle_key(init KeyEvent(KEY_CHAR, "q"))
+    assert(handled_q)
+    assert(!coordinator.show_help)
+}
+
+#[test]
+fun test_all_screens_and_dialog_rendering() {
+    set coordinator = init DemoSecondCoordinator()
+    set buf = init TerminalBuffer(cast(100, "int32"), cast(30, "int32"))
+
+    // render screen 0: OverviewScreen
+    buf.clear()
+    coordinator.draw(ref buf)
+    set cell_header = buf.get_cell(cast(0, "int32"), cast(0, "int32"))
+    assert(cell_header.ch == " ")
+    assert(cell_header.bg == "#89b4fa")
+
+    set cell_card = buf.get_cell(cast(3, "int32"), cast(2, "int32"))
+    assert(cell_card.ch.len() > 0)
+    assert(cell_card.bg == "#181825")
+
+    set cell_status = buf.get_cell(cast(0, "int32"), cast(29, "int32"))
+    assert(cell_status.bg == "#a6e3a1")
+
+    // render screen 1: FormScreen
+    coordinator.next_screen()
+    assert(coordinator.screen_idx == 1)
+    buf.clear()
+    coordinator.draw(ref buf)
+    set cell_form = buf.get_cell(cast(3, "int32"), cast(2, "int32"))
+    assert(cell_form.ch.len() > 0)
+    assert(cell_form.bg == "#181825")
+
+    // render screen 2: DataScreen
+    coordinator.next_screen()
+    assert(coordinator.screen_idx == 2)
+    buf.clear()
+    coordinator.draw(ref buf)
+    set cell_data = buf.get_cell(cast(48, "int32"), cast(2, "int32"))
+    assert(cell_data.ch.len() > 0)
+    assert(cell_data.bg == "#181825")
+
+    // render screen 3: DesignScreen
+    coordinator.next_screen()
+    assert(coordinator.screen_idx == 3)
+    buf.clear()
+    coordinator.draw(ref buf)
+    set cell_design = buf.get_cell(cast(3, "int32"), cast(2, "int32"))
+    assert(cell_design.ch.len() > 0)
+    assert(cell_design.bg == "#181825")
+
+    // render modal HelpDialog on top
+    coordinator.toggle_help()
+    assert(coordinator.show_help)
+    buf.clear()
+    coordinator.draw(ref buf)
+    set center_cell = buf.get_cell(cast(50, "int32"), cast(12, "int32"))
+    assert(center_cell.ch.len() > 0)
+}
+
+#[test]
+fun test_responsive_hiding_on_small_terminals() {
+    set coordinator = init DemoSecondCoordinator()
+
+    // 1. wide terminal (100x30): secondary telemetry and bottom cards are visible
+    set wide_buf = init TerminalBuffer(cast(100, "int32"), cast(30, "int32"))
+    wide_buf.clear()
+    coordinator.draw(ref wide_buf)
+
+    // primary left card title text
+    set primary_cell = wide_buf.get_cell(cast(3, "int32"), cast(2, "int32"))
+    assert(primary_cell.ch == "C")
+
+    // secondary right card (Network Packets) title at x=52, y=2 is rendered
+    set secondary_cell = wide_buf.get_cell(cast(52, "int32"), cast(2, "int32"))
+    assert(secondary_cell.ch == "N")
+
+    // 2. narrow terminal (80x25): secondary right card is hidden via hideBelow: 96
+    set narrow_buf = init TerminalBuffer(cast(80, "int32"), cast(25, "int32"))
+    narrow_buf.clear()
+    coordinator.draw(ref narrow_buf)
+
+    // primary card remains intact and visible
+    set primary_narrow = narrow_buf.get_cell(cast(3, "int32"), cast(2, "int32"))
+    assert(primary_narrow.ch == "C")
+
+    // secondary card at x=52, y=2 is hidden (blank fill space)
+    set secondary_narrow = narrow_buf.get_cell(cast(52, "int32"), cast(2, "int32"))
+    assert(secondary_narrow.ch == " ")
+
+    // 3. short terminal (80x18): bottom diagnostics block is hidden via minHeight: 22
+    set short_buf = init TerminalBuffer(cast(80, "int32"), cast(18, "int32"))
+    short_buf.clear()
+    coordinator.draw(ref short_buf)
+
+    // bottom block text at y=13 is not drawn on short screen
+    set bottom_short = short_buf.get_cell(cast(3, "int32"), cast(13, "int32"))
+    assert(bottom_short.ch == " ")
+}
+
+load siesta: BlockWidget, GaugeWidget, LineGaugeWidget, SparklineWidget, BarChartWidget, ParagraphWidget, BORDER_ROUNDED, ALIGN_LEFT, WRAP_WORD, init_rect, wrap_words
+
+#[test]
+fun test_regional_loop_isolation() {
+    set text = "Distributed cluster telemetry stream. High-frequency counters monitored across all active nodes via kernel eBPF probes."
+
+    set m0 = region_used()
+    for region i in 0..100 {
+        set lines = wrap_words(text, cast(50, "int32"))
+        assert(lines.len() > 0)
+    }
+    set d_wrap = region_used() - m0
+    // regional loop isolates local allocations
+    assert(d_wrap == 0)
+}
+
+#[test]
+fun test_long_running_render_memory_flatline() {
+    set coordinator = init DemoSecondCoordinator()
+    set db = init DoubleBuffer(cast(100, "int32"), cast(30, "int32"))
+
+    // warm-up initial render
+    db.back_buffer.clear()
+    coordinator.draw(ref db.back_buffer)
+    set _ = db.diff_and_flush()
+
+    set m_start = region_used()
+    for region i in 0..500 {
+        db.back_buffer.clear()
+        coordinator.draw(ref db.back_buffer)
+        set flushed = db.diff_and_flush()
+        assert(flushed >= 0)
+    }
+    set m_delta = region_used() - m_start
+    assert(m_delta == 0)
+}

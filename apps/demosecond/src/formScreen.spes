@@ -1,0 +1,48 @@
+extern formScreen
+
+screen formScreen {
+  shortcuts {
+    "z": onPrev
+    "x": onNext
+    "q": onQuit
+    "?": onHelp
+  }
+  col {
+    block(border: rounded, title: "Cluster Configuration Settings", fg: "#cdd6f4", bg: "#181825", borderFg: "#89b4fa", borderBg: "#181825") {
+      x: 1
+      y: 1
+      width: 52
+      height: 21
+    }
+    text("Environment Tier Selection:", x: 3, y: 2, fg: "#cdd6f4", bg: "#181825", bold: true)
+    tabs("[ Development ]   Staging   Production", x: 3, y: 3, fg: "#89b4fa", bg: "#181825")
+    text("Cluster Identifier:", x: 3, y: 5, fg: "#cdd6f4", bg: "#181825")
+    input(placeholder: "prod-cluster-us-east-01", x: 3, y: 6, width: 46, fg: "#ffffff", bg: "#313244")
+    text("API Gateway Endpoint URL:", x: 3, y: 8, fg: "#cdd6f4", bg: "#181825")
+    input(placeholder: "https://gateway.internal.net:8443/v1", x: 3, y: 9, width: 46, fg: "#ffffff", bg: "#313244")
+    text("Security and Scaling Flags:", x: 3, y: 11, fg: "#cdd6f4", bg: "#181825", bold: true)
+    checkbox("Enable TLS 1.3 Mutual Authentication", checked: true, x: 3, y: 12, fg: "#a6e3a1", bg: "#181825")
+    checkbox("Automatic Pod Autoscaling (HPA)", checked: true, x: 3, y: 13, fg: "#a6e3a1", bg: "#181825")
+    checkbox("Enable Verbose Distributed Tracing", checked: false, x: 3, y: 14, fg: "#585b70", bg: "#181825")
+    checkbox("Enforce Zero-Trust Network Policies", checked: true, x: 3, y: 15, fg: "#a6e3a1", bg: "#181825")
+    divider(x: 3, y: 17, width: 46, fg: "#45475a", bg: "#181825")
+    button("Deploy Configuration", x: 3, y: 18, fg: "#a6e3a1", bg: "#181825")
+    button("Reset to Defaults", x: 29, y: 18, fg: "#f38ba8", bg: "#181825")
+
+    block(border: rounded, title: "Policy & Security Notice", fg: "#cdd6f4", bg: "#181825", borderFg: "#f9e2af", borderBg: "#181825", hideBelow: 96) {
+      x: 54
+      y: 1
+      width: 44
+      height: 21
+    }
+    paragraph("Notice: All configuration updates undergo automated static policy verification and canary rollout stages prior to production application. Changes propagate across all cluster nodes within 500ms.", wrap: word, align: left, fg: "#cdd6f4", bg: "#181825", x: 56, y: 2, width: 40, height: 5, hideBelow: 96)
+    divider(x: 56, y: 8, width: 40, fg: "#45475a", bg: "#181825", hideBelow: 96)
+    text("Compliance Requirements:", x: 56, y: 9, fg: "#f9e2af", bg: "#181825", bold: true, hideBelow: 96)
+    text("  * SOC-2 Type II Certified", x: 56, y: 10, fg: "#cdd6f4", bg: "#181825", hideBelow: 96)
+    text("  * End-to-end Encryption Enforced", x: 56, y: 11, fg: "#cdd6f4", bg: "#181825", hideBelow: 96)
+    text("  * Audit Logs Retained for 90 Days", x: 56, y: 12, fg: "#cdd6f4", bg: "#181825", hideBelow: 96)
+    text("  * Automated Vulnerability Scanning", x: 56, y: 13, fg: "#cdd6f4", bg: "#181825", hideBelow: 96)
+    divider(x: 56, y: 15, width: 40, fg: "#45475a", bg: "#181825", hideBelow: 96)
+    text("Status: Policy verified and valid", x: 56, y: 17, fg: "#a6e3a1", bg: "#181825", bold: true, hideBelow: 96)
+  }
+}

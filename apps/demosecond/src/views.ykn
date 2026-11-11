@@ -1,0 +1,249 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.itermtool.mouse: MouseEvent
+
+load std.itermtool.key: KeyEvent, 
+                        KEY_CHAR, 
+                        KEY_ESC, 
+                        KEY_TAB, 
+                        KEY_ENTER, 
+                        KEY_SPACE, 
+                        KEY_UP, 
+                        KEY_DOWN, 
+                        KEY_LEFT, 
+                        KEY_RIGHT, 
+                        KEY_F1
+
+load siesta: TerminalBuffer, 
+            Screen, 
+            Dialog, 
+            BlockWidget, 
+            ParagraphWidget, 
+            GaugeWidget, 
+            LineGaugeWidget, 
+            SparklineWidget, 
+            BarChartWidget, 
+            ScrollbarWidget, 
+            TreeWidget, 
+            TreeItem, 
+            init_tree_item, 
+            CanvasWidget, 
+            init_rect, 
+            BORDER_ROUNDED, 
+            BORDER_DOUBLE, 
+            BORDER_THICK, 
+            BORDER_ASCII, 
+            BORDER_PLAIN, 
+            BORDER_NONE, 
+            ALIGN_LEFT, 
+            ALIGN_CENTER, 
+            ALIGN_RIGHT, 
+            WRAP_NONE, 
+            WRAP_CHAR, 
+            WRAP_WORD, 
+            log_debug
+
+#[siesta::res("views.spes", "locales.toml")]
+class GeneratedViews {}
+
+public class DemoSecondCoordinator {
+    public screen_idx: int32
+    public show_help: bool
+    public theme: ShowcaseTheme
+    public overview_screen: OverviewScreen
+    public form_screen: FormScreen
+    public data_screen: DataScreen
+    public design_screen: DesignScreen
+    public help_dialog: HelpDialog
+
+    public fun init() {
+        rewrite this.screen_idx = 0
+        rewrite this.show_help = false
+        rewrite this.theme = init ShowcaseTheme()
+        rewrite this.overview_screen = init OverviewScreen()
+        rewrite this.form_screen = init FormScreen()
+        rewrite this.data_screen = init DataScreen()
+        rewrite this.design_screen = init DesignScreen()
+        rewrite this.help_dialog = init HelpDialog()
+    }
+
+    public fun next_screen() {
+        rewrite this.screen_idx = (this.screen_idx + cast(1, "int32")) % cast(4, "int32")
+    }
+
+    public fun prev_screen() {
+        rewrite this.screen_idx = (this.screen_idx + cast(3, "int32")) % cast(4, "int32")
+    }
+
+    public fun toggle_help() {
+        rewrite this.show_help = !this.show_help
+    }
+
+    public fun close_help() {
+        rewrite this.show_help = false
+    }
+
+    public fun handle_key(key: KeyEvent) -> bool {
+        if this.show_help {
+            if key.code == KEY_ESC || (key.code == KEY_CHAR && (key.char_val == "q" || key.char_val == "Q" || key.char_val == "?")) {
+                rewrite this.show_help = false
+                return true
+            }
+            set handled = this.help_dialog.handle_key(key)
+            if this.help_dialog.pop_action() == "onClose" {
+                rewrite this.show_help = false
+                return true
+            }
+            return handled
+        }
+
+        if key.code == KEY_CHAR && key.char_val == "?" {
+            rewrite this.show_help = true
+            return true
+        }
+
+        set handled: bool = false
+        if this.screen_idx == 0 {
+            rewrite handled = this.overview_screen.handle_key(key)
+            set act = this.overview_screen.pop_action()
+            this.dispatch_action(act)
+        } elif this.screen_idx == 1 {
+            rewrite handled = this.form_screen.handle_key(key)
+            set act = this.form_screen.pop_action()
+            this.dispatch_action(act)
+        } elif this.screen_idx == 2 {
+            rewrite handled = this.data_screen.handle_key(key)
+            set act = this.data_screen.pop_action()
+            this.dispatch_action(act)
+        } else {
+            rewrite handled = this.design_screen.handle_key(key)
+            set act = this.design_screen.pop_action()
+            this.dispatch_action(act)
+        }
+        return handled
+    }
+
+    fun dispatch_action(action: string) {
+        if action == "onNext" {
+            this.next_screen()
+            return
+        }
+        if action == "onPrev" {
+            this.prev_screen()
+            return
+        }
+        if action == "onHelp" {
+            rewrite this.show_help = true
+            return
+        }
+    }
+
+    public fun draw(ref buf: TerminalBuffer) {
+        set w = buf.width
+        set h = buf.height
+
+        // 1. fill the entire screen buffer with theme background (#1e1e2e)
+        buf.fill(init_cell(" ", this.theme.fg, this.theme.bg, false, false, false, false, false))
+
+        // 2. render active screen content in middle area
+        if this.screen_idx == 0 {
+            this.overview_screen.draw(ref buf)
+        } elif this.screen_idx == 1 {
+            this.form_screen.draw(ref buf)
+        } elif this.screen_idx == 2 {
+            this.data_screen.draw(ref buf)
+        } else {
+            this.design_screen.draw(ref buf)
+        }
+
+        // 3. row 0: top header bar (solid #11111b across all columns)
+        for c in 0..w {
+            buf.draw_text(cast(c, "int32"), 0, " ", this.theme.headerFg, this.theme.headerBg, false, false, false, false, false)
+        }
+        set title_badge = " SIESTA SHOWCASE "
+        buf.draw_text(0, 0, title_badge, this.theme.headerBg, this.theme.primary, true, false, false, false, false)
+
+        set screen_label: string = if w >= 100 {
+            if this.screen_idx == 0 {
+                " [1/4] Overview & System Telemetry "
+            } elif this.screen_idx == 1 {
+                " [2/4] Interactive Configuration & Controls "
+            } elif this.screen_idx == 2 {
+                " [3/4] Data Hierarchy, Trees & Tables "
+            } else {
+                " [4/4] Design Gallery & Vector Canvas "
+            }
+        } else {
+            if this.screen_idx == 0 {
+                " [1/4] Telemetry "
+            } elif this.screen_idx == 1 {
+                " [2/4] Config "
+            } elif this.screen_idx == 2 {
+                " [3/4] Inventory "
+            } else {
+                " [4/4] Design "
+            }
+        }
+        buf.draw_text(cast(title_badge.len(), "int32"), 0, screen_label, this.theme.headerFg, this.theme.headerBg, false, false, false, false, false)
+
+        set right_info = "[z: Prev] [x: Next] [?: Help] [q: Quit] "
+        set right_info_w = cast(right_info.len(), "int32")
+        if w >= 80 {
+            buf.draw_text(w - right_info_w, 0, right_info, this.theme.accent, this.theme.headerBg, false, false, false, false, false)
+        }
+
+        // 4. row h - 1: bottom status bar (solid #11111b across all columns)
+        for sc in 0..w {
+            buf.draw_text(cast(sc, "int32"), h - 1, " ", this.theme.statusFg, this.theme.statusBg, false, false, false, false, false)
+        }
+        set badge_mode: string = if this.screen_idx == 0 {
+            " [TELEMETRY] "
+        } elif this.screen_idx == 1 {
+            " [CONFIG] "
+        } elif this.screen_idx == 2 {
+            " [INVENTORY] "
+        } else {
+            " [GALLERY] "
+        }
+        set badge_fg = this.theme.headerBg
+        set badge_bg: string = if this.screen_idx == 0 {
+            this.theme.secondary
+        } elif this.screen_idx == 1 {
+            this.theme.primary
+        } elif this.screen_idx == 2 {
+            this.theme.accent
+        } else {
+            this.theme.danger
+        }
+        buf.draw_text(0, h - 1, badge_mode, badge_fg, badge_bg, true, false, false, false, false)
+
+        set bp_name: string = if w >= 120 {
+            "DESKTOP"
+        } elif w >= 80 {
+            "COMPACT"
+        } else {
+            "MOBILE"
+        }
+        set right_status = "[" + bp_name + " " + cast(w, "string") + "x" + cast(h, "string") + "] | Mocha "
+        set right_w = cast(right_status.len(), "int32")
+        if w >= 80 {
+            buf.draw_text(w - right_w, h - 1, right_status, this.theme.accent, this.theme.statusBg, true, false, false, false, false)
+        }
+
+        set badge_len = cast(badge_mode.len(), "int32")
+        set status_msg: string = if w < 96 {
+            " [Compact: expand >= 96 cols for secondary telemetry] "
+        } else {
+            " Declarative UI via .spes | Hotkeys: z, x, ?, q "
+        }
+        if w > badge_len + cast(status_msg.len(), "int32") + right_w {
+            buf.draw_text(badge_len, h - 1, status_msg, this.theme.statusFg, this.theme.statusBg, false, false, false, false, false)
+        }
+
+        // 5. modal dialog if active
+        if this.show_help {
+            this.help_dialog.draw(ref buf)
+        }
+    }
+}

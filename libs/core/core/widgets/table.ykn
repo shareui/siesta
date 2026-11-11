@@ -1,0 +1,329 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.itermtool.key: KEY_UP, KEY_DOWN, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_ENTER
+load ..buffer: TerminalBuffer
+load ..cell: init_cell
+
+public struct TableColumn {
+    title: string
+    width: int32
+    align: string
+}
+
+public struct TableRow {
+    cells: string[]
+}
+
+fun pad_spaces(count: int32) -> string {
+    if count <= 0 {
+        return ""
+    }
+    set spaces = "                                                                                "
+    set c_i64 = cast(count, "int64")
+    if c_i64 <= spaces.len() {
+        return spaces[0..c_i64]
+    }
+    return spaces
+}
+
+fun make_dash_string(width: int32) -> string {
+    if width <= 0 {
+        return ""
+    }
+    set dashes = "--------------------------------------------------------------------------------"
+    set w_i64 = cast(width, "int64")
+    if w_i64 <= dashes.len() {
+        return dashes[0..w_i64]
+    }
+    return dashes
+}
+
+public fun format_table_cell(text: string, width: int32, align: string = "left") -> string {
+    if width <= 0 {
+        return ""
+    }
+    set tlen = cast(text.len(), "int32")
+    if tlen == width {
+        return text
+    }
+    if tlen > width {
+        if width > 2 {
+            return text[0..cast(width - 2, "int64")] + ".."
+        }
+        return text[0..cast(width, "int64")]
+    }
+    set diff = width - tlen
+    if align == "right" {
+        return pad_spaces(diff) + text
+    }
+    if align == "center" {
+        set left_pad = diff / 2
+        set right_pad = diff - left_pad
+        return pad_spaces(left_pad) + text + pad_spaces(right_pad)
+    }
+    return text + pad_spaces(diff)
+}
+
+public class TableWidget {
+    public id: string
+    public columns: TableColumn[]
+    public rows: TableRow[]
+    public selected_index: int32
+    public scroll_top: int32
+    public sort_col: int32
+    public sort_asc: bool
+    public focused: bool
+    public show_header: bool
+    public header_fg: string
+    public header_bg: string
+    public selected_fg: string
+    public selected_bg: string
+
+    public fun init(id: string, show_header: bool = true) {
+        set cols: TableColumn[] = []
+        set rws: TableRow[] = []
+        rewrite this.id = id
+        rewrite this.columns = cols
+        rewrite this.rows = rws
+        rewrite this.selected_index = 0
+        rewrite this.scroll_top = 0
+        rewrite this.sort_col = -1
+        rewrite this.sort_asc = true
+        rewrite this.focused = false
+        rewrite this.show_header = show_header
+        rewrite this.header_fg = "cyan"
+        rewrite this.header_bg = "default"
+        rewrite this.selected_fg = "black"
+        rewrite this.selected_bg = "cyan"
+    }
+
+    public fun add_column(title: string, width: int32 = 12, align: string = "left") -> TableWidget {
+        this.columns.push(TableColumn {
+            title: title,
+            width: width,
+            align: align,
+        })
+        return this
+    }
+
+    public fun add_row(cells: string[]) -> TableWidget {
+        this.rows.push(TableRow {
+            cells: cells,
+        })
+        return this
+    }
+
+    public fun clear_rows() -> TableWidget {
+        this.rows.clear()
+        rewrite this.selected_index = 0
+        rewrite this.scroll_top = 0
+        return this
+    }
+
+    public fun row_count() -> int32 {
+        return cast(this.rows.len(), "int32")
+    }
+
+    public fun col_count() -> int32 {
+        return cast(this.columns.len(), "int32")
+    }
+
+    public fun ensure_visible(view_height: int32) {
+        if this.selected_index < this.scroll_top {
+            rewrite this.scroll_top = this.selected_index
+        } else {
+            if this.selected_index >= this.scroll_top + view_height {
+                rewrite this.scroll_top = this.selected_index - view_height + 1
+            }
+        }
+        if this.scroll_top < 0 {
+            rewrite this.scroll_top = 0
+        }
+    }
+
+    public fun select_row(index: int32) -> TableWidget {
+        if index >= 0 && index < this.row_count() {
+            rewrite this.selected_index = index
+        }
+        return this
+    }
+
+    public fun select_next() -> TableWidget {
+        if this.selected_index < this.row_count() - 1 {
+            rewrite this.selected_index = this.selected_index + 1
+        }
+        return this
+    }
+
+    public fun select_prev() -> TableWidget {
+        if this.selected_index > 0 {
+            rewrite this.selected_index = this.selected_index - 1
+        }
+        return this
+    }
+
+    public fun sort_by(col_idx: int32, asc: bool = true) -> TableWidget {
+        if col_idx < 0 || col_idx >= this.col_count() || this.rows.len() <= 1 {
+            return this
+        }
+        rewrite this.sort_col = col_idx
+        rewrite this.sort_asc = asc
+        set n = this.rows.len()
+        set c_idx = cast(col_idx, "int64")
+
+        // bubble sort rows by column text
+        for i in 0..n {
+            for j in 0..n - 1 - i {
+                set val_a = ""
+                set val_b = ""
+                if c_idx < this.rows[j].cells.len() {
+                    rewrite val_a = this.rows[j].cells[c_idx]
+                }
+                if c_idx < this.rows[j + 1].cells.len() {
+                    rewrite val_b = this.rows[j + 1].cells[c_idx]
+                }
+                set should_swap = false
+                if asc {
+                    if val_a > val_b {
+                        rewrite should_swap = true
+                    }
+                } else {
+                    if val_a < val_b {
+                        rewrite should_swap = true
+                    }
+                }
+                if should_swap {
+                    set temp = this.rows[j]
+                    rewrite this.rows[j] = this.rows[j + 1]
+                    rewrite this.rows[j + 1] = temp
+                }
+            }
+        }
+        return this
+    }
+
+    public fun handle_key(code: int32, view_height: int32 = 10) -> bool {
+        if code == KEY_UP {
+            this.select_prev()
+            this.ensure_visible(view_height)
+            return true
+        }
+        if code == KEY_DOWN {
+            this.select_next()
+            this.ensure_visible(view_height)
+            return true
+        }
+        if code == KEY_HOME {
+            rewrite this.selected_index = 0
+            this.ensure_visible(view_height)
+            return true
+        }
+        if code == KEY_END {
+            if this.row_count() > 0 {
+                rewrite this.selected_index = this.row_count() - 1
+                this.ensure_visible(view_height)
+            }
+            return true
+        }
+        if code == KEY_PAGE_UP {
+            rewrite this.selected_index = this.selected_index - view_height
+            if this.selected_index < 0 {
+                rewrite this.selected_index = 0
+            }
+            this.ensure_visible(view_height)
+            return true
+        }
+        if code == KEY_PAGE_DOWN {
+            rewrite this.selected_index = this.selected_index + view_height
+            set max_idx = this.row_count() - 1
+            if this.selected_index > max_idx {
+                rewrite this.selected_index = max_idx
+            }
+            this.ensure_visible(view_height)
+            return true
+        }
+        return false
+    }
+
+    fun render_header(ref buf: TerminalBuffer, x: int32, y: int32, w: int32) {
+        set cur_x = x
+        for i in 0..this.columns.len() {
+            set col = this.columns[i]
+            set col_title = col.title
+            if cast(i, "int32") == this.sort_col {
+                if this.sort_asc {
+                    rewrite col_title = col_title + " ^"
+                } else {
+                    rewrite col_title = col_title + " v"
+                }
+            }
+            set cell_str = format_table_cell(col_title, col.width, col.align)
+            buf.draw_text(cur_x, y, cell_str, this.header_fg, this.header_bg, true, false, false, false, false)
+            set cur_x = cur_x + col.width + 1
+            if cur_x < x + w {
+                buf.draw_text(cur_x - 1, y, "|", "dim", "default", false, false, false, false, false)
+            }
+        }
+    }
+
+    fun render_separator(ref buf: TerminalBuffer, x: int32, y: int32, w: int32) {
+        set cur_x = x
+        for i in 0..this.columns.len() {
+            set col = this.columns[i]
+            set sep = make_dash_string(col.width)
+            buf.draw_text(cur_x, y, sep, "dim", "default", false, false, false, false, false)
+            set cur_x = cur_x + col.width + 1
+            if cur_x < x + w {
+                buf.draw_text(cur_x - 1, y, "+", "dim", "default", false, false, false, false, false)
+            }
+        }
+    }
+
+    fun render_data_rows(ref buf: TerminalBuffer, x: int32, start_y: int32, w: int32, avail_rows: int32) {
+        for r in 0..avail_rows {
+            set row_idx = this.scroll_top + cast(r, "int32")
+            if row_idx >= this.row_count() {
+                break
+            }
+            set is_sel = row_idx == this.selected_index && this.focused
+            set fg_c: string = if is_sel { this.selected_fg } else { "default" }
+            set bg_c: string = if is_sel { this.selected_bg } else { "default" }
+            set cur_x = x
+            set row_data = this.rows[cast(row_idx, "int64")]
+
+            for c in 0..this.columns.len() {
+                set col = this.columns[c]
+                set cell_val = ""
+                if c < row_data.cells.len() {
+                    rewrite cell_val = row_data.cells[c]
+                }
+                set cell_str = format_table_cell(cell_val, col.width, col.align)
+                buf.draw_text(cur_x, start_y + cast(r, "int32"), cell_str, fg_c, bg_c, false, false, false, false, false)
+                set cur_x = cur_x + col.width + 1
+                if cur_x < x + w {
+                    buf.draw_text(cur_x - 1, start_y + cast(r, "int32"), "|", "dim", "default", false, false, false, false, false)
+                }
+            }
+        }
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, w: int32, h: int32) {
+        if w <= 0 || h <= 0 || this.columns.len() == 0 {
+            return
+        }
+        set cur_y = y
+        if this.show_header {
+            this.render_header(ref buf, x, cur_y, w)
+            rewrite cur_y = cur_y + 1
+            if cur_y < y + h {
+                this.render_separator(ref buf, x, cur_y, w)
+                rewrite cur_y = cur_y + 1
+            }
+        }
+        set remaining_rows = y + h - cur_y
+        if remaining_rows > 0 {
+            this.render_data_rows(ref buf, x, cur_y, w, remaining_rows)
+        }
+    }
+}

@@ -1,0 +1,42 @@
+version = 1
+target = "x86_64-unknown-linux-gnu"
+compiler = "0.1.0"
+profile = "debug"
+
+[[package]]
+name = "demo"
+version = "0.1.1"
+kind = "app"
+source = "root"
+checksum = "blake3:f5d0a2f1eb026b87520265ddd8fb299cf8d510d21ddaf482e9c7225fcb55d00f"
+features = ["default"]
+dependencies = ["siesta"]
+
+[[package]]
+name = "siesta"
+version = "0.1.0"
+kind = "static"
+source = "path+../../libs/siesta"
+checksum = "blake3:df67708b49edbcfcb1225a965cda87344da5579891dfa15fef91a47bebfcb399"
+features = ["default"]
+
+[[package]]
+name = "siesta_res"
+version = "0.1.0"
+kind = "macro"
+source = "path+/home/shareui/dev/yuki-lang/source/offlibs/siesta/apps/demo/../../libs/siesta/../siestaloader"
+checksum = "blake3:31ebcb5be5dbd06ba20192c5837ddac17455d6bb80375eaa8f5e8b409a5d6523"
+
+[[package]]
+name = "siesta_res_siesta_core"
+version = "0.1.0"
+kind = "static"
+source = "path+/home/shareui/dev/yuki-lang/source/offlibs/siesta/apps/demo/../../libs/siesta/../siestaloader/../core"
+checksum = "blake3:2531076a67a2bddff2f46771737fbed8fabb06dc768398851a9113e6c46d9532"
+
+[[package]]
+name = "siesta_siesta_core"
+version = "0.1.0"
+kind = "static"
+source = "path+/home/shareui/dev/yuki-lang/source/offlibs/siesta/apps/demo/../../libs/siesta/../core"
+checksum = "blake3:2531076a67a2bddff2f46771737fbed8fabb06dc768398851a9113e6c46d9532"

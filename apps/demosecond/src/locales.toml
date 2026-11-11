@@ -1,0 +1,127 @@
+[screen.overview_title]
+ru = "SIESTA SYSTEM MONITOR [1/4]"
+en = "SIESTA SYSTEM MONITOR [1/4]"
+
+[screen.nav_hint]
+ru = "[z] Назад   [x] Вперед   [?] Помощь   [q] Выход"
+en = "[z] Prev   [x] Next   [?] Help   [q] Quit"
+
+[overview.cpu_label]
+ru = "Загрузка процессора"
+en = "CPU Utilization"
+
+[overview.ram_label]
+ru = "Пул оперативной памяти"
+en = "Memory Pool"
+
+[overview.net_label]
+ru = "Сетевой трафик (пакетов/сек)"
+en = "Network Throughput (pkts/sec)"
+
+[overview.cluster_label]
+ru = "Нагрузка по узлам кластера (rps)"
+en = "Cluster Node Load (rps)"
+
+[overview.status]
+ru = "Статус: Штатный | Все узлы кластера в рабочем состоянии"
+en = "Status: Nominal | All cluster nodes fully operational"
+
+[screen.form_title]
+ru = "ФОРМЫ И ЭЛЕМЕНТЫ УПРАВЛЕНИЯ [2/4]"
+en = "FORMS & CONTROL WIDGETS [2/4]"
+
+[form.cluster_name]
+ru = "Имя кластера"
+en = "Cluster Identifier"
+
+[form.endpoint]
+ru = "Адрес API шлюза"
+en = "API Gateway Endpoint"
+
+[form.tls]
+ru = "Включить шифрование TLS 1.3"
+en = "Enable TLS 1.3 Encryption"
+
+[form.autoscale]
+ru = "Автоматическое масштабирование"
+en = "Automatic Horizontal Scaling"
+
+[form.audit]
+ru = "Детальный аудит безопасности"
+en = "Verbose Security Audit"
+
+[form.btn_deploy]
+ru = "Применить конфигурацию"
+en = "Apply Configuration"
+
+[form.btn_reset]
+ru = "Сбросить параметры"
+en = "Reset Parameters"
+
+[form.note]
+ru = "Изменения конфигурации применяются ко всем узлам в течение 500мс."
+en = "Configuration changes propagate across all cluster nodes within 500ms."
+
+[screen.data_title]
+ru = "ТАБЛИЦЫ, ДЕРЕВЬЯ И СКРОЛЛБАРЫ [3/4]"
+en = "TABLES, TREES & SCROLLBARS [3/4]"
+
+[data.tree_title]
+ru = "Дерево сервисов"
+en = "Service Tree"
+
+[data.table_title]
+ru = "Инвентарь кластера"
+en = "Cluster Inventory"
+
+[data.status]
+ru = "Отображаются 4 активных пода | Глубина дерева: 3 | Синхронизация: OK"
+en = "Showing 4 active pods | Tree depth: 3 | Sync status: OK"
+
+[screen.design_title]
+ru = "ДИЗАЙН, РАМКИ И ВЕКТОРНЫЙ ХОЛСТ [4/4]"
+en = "DESIGN, FRAMES & VECTOR CANVAS [4/4]"
+
+[design.rounded]
+ru = "Скругленная рамка"
+en = "Rounded Frame"
+
+[design.double]
+ru = "Двойная рамка"
+en = "Double Frame"
+
+[design.thick]
+ru = "Жирная рамка"
+en = "Thick Frame"
+
+[design.ascii]
+ru = "Классический ASCII"
+en = "Classic ASCII"
+
+[design.canvas_title]
+ru = "Векторный холст шрифта Брайля"
+en = "Braille Vector Canvas"
+
+[help.title]
+ru = "Справка по управлению"
+en = "Help & Navigation"
+
+[help.nav_header]
+ru = "[Навигация по экранам]"
+en = "[Screen Navigation]"
+
+[help.nav_text]
+ru = "  z : Предыдущий экран   |   x : Следующий экран"
+en = "  z : Previous Screen    |   x : Next Screen"
+
+[help.actions_header]
+ru = "[Общие действия]"
+en = "[General Actions]"
+
+[help.actions_text]
+ru = "  ? : Открыть/закрыть справку | q / Esc : Выход"
+en = "  ? : Toggle Help Dialog      | q / Esc : Exit / Close"
+
+[help.footer]
+ru = "Нажмите Esc или q чтобы закрыть окно справки"
+en = "Press Esc or q to dismiss this dialog"

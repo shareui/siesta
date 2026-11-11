@@ -1,0 +1,133 @@
+#![lint::allow("unused_import")]
+
+public static EASING_LINEAR: string = "linear"
+public static EASING_EASE_IN: string = "ease_in"
+public static EASING_EASE_OUT: string = "ease_out"
+public static EASING_EASE_IN_OUT: string = "ease_in_out"
+public static EASING_BOUNCE: string = "bounce"
+public static EASING_ELASTIC: string = "elastic"
+
+public fun clamp01(t: float64) -> float64 {
+    if t < 0.0 { return 0.0 }
+    if t > 1.0 { return 1.0 }
+    return t
+}
+
+public fun linear(t: float64) -> float64 {
+    return clamp01(t)
+}
+
+public fun ease_in_quad(t: float64) -> float64 {
+    set ct = clamp01(t)
+    return ct * ct
+}
+
+public fun ease_out_quad(t: float64) -> float64 {
+    set ct = clamp01(t)
+    return ct * (2.0 - ct)
+}
+
+public fun ease_in_out_quad(t: float64) -> float64 {
+    set ct = clamp01(t)
+    if ct < 0.5 { return 2.0 * ct * ct }
+    return -1.0 + (4.0 - 2.0 * ct) * ct
+}
+
+public fun ease_in_cubic(t: float64) -> float64 {
+    set ct = clamp01(t)
+    return ct * ct * ct
+}
+
+public fun ease_out_cubic(t: float64) -> float64 {
+    set ct = clamp01(t)
+    set sub = ct - 1.0
+    return sub * sub * sub + 1.0
+}
+
+public fun ease_in_out_cubic(t: float64) -> float64 {
+    set ct = clamp01(t)
+    if ct < 0.5 {
+        return 4.0 * ct * ct * ct
+    }
+    set sub = 2.0 * ct - 2.0
+    return 0.5 * sub * sub * sub + 1.0
+}
+
+public fun bounce_out(t: float64) -> float64 {
+    set ct = clamp01(t)
+    set n1 = 7.5625
+    set d1 = 2.75
+    if ct < 1.0 / d1 {
+        return n1 * ct * ct
+    }
+    if ct < 2.0 / d1 {
+        set sub = ct - 1.5 / d1
+        return n1 * sub * sub + 0.75
+    }
+    if ct < 2.5 / d1 {
+        set sub = ct - 2.25 / d1
+        return n1 * sub * sub + 0.9375
+    }
+    set sub = ct - 2.625 / d1
+    return n1 * sub * sub + 0.984375
+}
+
+public fun bounce_in(t: float64) -> float64 {
+    set ct = clamp01(t)
+    return 1.0 - bounce_out(1.0 - ct)
+}
+
+public fun bounce_in_out(t: float64) -> float64 {
+    set ct = clamp01(t)
+    if ct < 0.5 {
+        return 0.5 * bounce_in(ct * 2.0)
+    }
+    return 0.5 + 0.5 * bounce_out(ct * 2.0 - 1.0)
+}
+
+public fun elastic_out(t: float64) -> float64 {
+    set ct = clamp01(t)
+    if ct == 0.0 {
+        return 0.0
+    }
+    if ct >= 1.0 {
+        return 1.0
+    }
+    set sub = ct - 1.0
+    set s = 1.70158 * 1.525
+    return sub * sub * ((s + 1.0) * sub + s) + 1.0
+}
+
+public fun sample_easing(name: string, t: float64) -> float64 {
+    if name == "ease_in" {
+        return ease_in_quad(t)
+    }
+    if name == "ease_out" {
+        return ease_out_quad(t)
+    }
+    if name == "ease_in_out" {
+        return ease_in_out_quad(t)
+    }
+    if name == "ease_in_cubic" {
+        return ease_in_cubic(t)
+    }
+    if name == "ease_out_cubic" {
+        return ease_out_cubic(t)
+    }
+    if name == "ease_in_out_cubic" {
+        return ease_in_out_cubic(t)
+    }
+    if name == "bounce" || name == "bounce_out" {
+        return bounce_out(t)
+    }
+    if name == "bounce_in" {
+        return bounce_in(t)
+    }
+    if name == "bounce_in_out" {
+        return bounce_in_out(t)
+    }
+    if name == "elastic" || name == "elastic_out" {
+        return elastic_out(t)
+    }
+    return linear(t)
+}

@@ -1,0 +1,67 @@
+[editor.title]
+ru = "Siesta Demo"
+en = "Siesta Demo"
+
+[editor.mode_normal]
+ru = "NORMAL"
+en = "NORMAL"
+
+[editor.mode_insert]
+ru = "INSERT"
+en = "INSERT"
+
+[editor.saved]
+ru = "Файл успешно сохранен"
+en = "File saved successfully"
+
+[dialog.unsaved]
+ru = "Есть несохраненные изменения. Выйти без сохранения? (y/n)"
+en = "Unsaved changes exist. Quit without saving? (y/n)"
+
+[controls.title]
+ru = "Горячие клавиши и управление"
+en = "Hotkeys & Controls"
+
+[controls.nav_header]
+ru = "[Навигация]"
+en = "[Navigation]"
+
+[controls.nav_keys]
+ru = "  h/j/k/l или Стрелки : перемещение курсора"
+en = "  h/j/k/l or Arrows   : move cursor"
+
+[controls.mode_header]
+ru = "[Режимы]"
+en = "[Modes]"
+
+[controls.mode_keys]
+ru = "  i : режим вставки   |  Esc : нормальный режим"
+en = "  i : insert mode     |  Esc : normal mode"
+
+[controls.tree_header]
+ru = "[Проводник файлов]"
+en = "[File Tree]"
+
+[controls.tree_keys]
+ru = "  Tab : фокус ввода   |  j/k : выбор  |  Enter : открыть"
+en = "  Tab : toggle focus  |  j/k : select |  Enter : open"
+
+[controls.edit_header]
+ru = "[Редактирование]"
+en = "[Editing]"
+
+[controls.edit_keys]
+ru = "  o : строка снизу    |  dd : удалить строку  |  x : удалить символ"
+en = "  o : new line below  |  dd : delete line     |  x : delete char"
+
+[controls.file_header]
+ru = "[Файл и справка]"
+en = "[File & Help]"
+
+[controls.file_keys]
+ru = "  Ctrl+S : сохранить  |  Ctrl+Q : выйти  |  Ctrl+\\ : справка"
+en = "  Ctrl+S : save file  |  Ctrl+Q : quit   |  Ctrl+\\ : help"
+
+[controls.close_hint]
+ru = "Нажмите [q] или [Esc], чтобы закрыть"
+en = "Press [q] or [Esc] to close"

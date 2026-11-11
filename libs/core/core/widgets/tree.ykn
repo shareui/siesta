@@ -1,0 +1,145 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+load ..layout.rect: Rect
+load std.itermtool.key: KEY_UP, KEY_DOWN, KEY_ENTER, KEY_SPACE
+
+public struct TreeItem {
+    id: string
+    label: string
+    depth: int32
+    is_dir: bool
+    is_expanded: bool
+}
+
+public fun init_tree_item(id: string, label: string, depth: int32 = 0, is_dir: bool = false, is_expanded: bool = false) -> TreeItem {
+    return TreeItem {
+        id: id,
+        label: label,
+        depth: depth,
+        is_dir: is_dir,
+        is_expanded: is_expanded
+    }
+}
+
+public class TreeWidget {
+    public items: TreeItem[]
+    public selected_index: int32
+    public scroll_top: int32
+    public focused: bool
+    public fg: string
+    public bg: string
+    public dir_fg: string
+    public active_fg: string
+    public active_bg: string
+
+    public fun init(
+        items: TreeItem[] = [],
+        selected_index: int32 = 0,
+        scroll_top: int32 = 0,
+        focused: bool = false,
+        fg: string = "default",
+        bg: string = "default",
+        dir_fg: string = "blue",
+        active_fg: string = "white",
+        active_bg: string = "cyan"
+    ) {
+        rewrite this.items = items
+        rewrite this.selected_index = selected_index
+        rewrite this.scroll_top = scroll_top
+        rewrite this.focused = focused
+        rewrite this.fg = fg
+        rewrite this.bg = bg
+        rewrite this.dir_fg = dir_fg
+        rewrite this.active_fg = active_fg
+        rewrite this.active_bg = active_bg
+    }
+
+    public fun set_items(items: TreeItem[]) {
+        set total_len = cast(items.len(), "int32")
+        rewrite this.items = items
+        if this.selected_index >= total_len {
+            rewrite this.selected_index = if total_len > 0 { total_len - 1 } else { cast(0, "int32") }
+        }
+    }
+
+    public fun handle_key(key_code: int32) -> bool {
+        set total = cast(this.items.len(), "int32")
+        if total == 0 {
+            return false
+        }
+        if key_code == KEY_UP {
+            if this.selected_index > 0 {
+                rewrite this.selected_index = this.selected_index - 1
+                if this.selected_index < this.scroll_top {
+                    rewrite this.scroll_top = this.selected_index
+                }
+            }
+            return true
+        }
+        if key_code == KEY_DOWN {
+            if this.selected_index < total - 1 {
+                rewrite this.selected_index = this.selected_index + 1
+            }
+            return true
+        }
+        if key_code == KEY_ENTER || key_code == KEY_SPACE {
+            if this.selected_index >= 0 && this.selected_index < total {
+                set it = this.items[cast(this.selected_index, "int64")]
+                if it.is_dir {
+                    rewrite it.is_expanded = !it.is_expanded
+                    rewrite this.items[cast(this.selected_index, "int64")] = it
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    public fun render(ref buf: TerminalBuffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return
+        }
+
+        set total = cast(this.items.len(), "int32")
+        // ensure selected is in viewport
+        if this.selected_index >= this.scroll_top + area.height {
+            rewrite this.scroll_top = this.selected_index - area.height + 1
+        }
+        if this.selected_index < this.scroll_top {
+            rewrite this.scroll_top = this.selected_index
+        }
+
+        for row in 0..area.height {
+            set idx = this.scroll_top + cast(row, "int32")
+            set cy = area.y + cast(row, "int32")
+            if idx >= total {
+                for col in 0..area.width {
+                    buf.draw_text(area.x + cast(col, "int32"), cy, " ", this.fg, this.bg, false, false, false, false, false)
+                }
+            } else {
+                set item = this.items[cast(idx, "int64")]
+                set is_sel = (idx == this.selected_index)
+                set sel_pfx: string = if is_sel { "> " } else { "  " }
+                set indent: string = ""
+                for d in 0..item.depth {
+                    rewrite indent = indent + "  "
+                }
+                set icon: string = if item.is_dir { (if item.is_expanded { "▼ " } else { "▶ " }) } else { "  " }
+                set line = sel_pfx + indent + icon + item.label
+                if cast(line.len(), "int32") > area.width {
+                    rewrite line = line[0..cast(area.width, "int64")]
+                } else {
+                    while cast(line.len(), "int32") < area.width {
+                        rewrite line = line + " "
+                    }
+                }
+                set item_fg: string = if is_sel { this.active_fg } elif item.is_dir { this.dir_fg } else { this.fg }
+                set item_bg: string = if is_sel { (if this.focused { this.active_bg } else { "gray" }) } else { this.bg }
+                set bold = item.is_dir || is_sel
+                buf.draw_text(area.x, cy, line, item_fg, item_bg, bold, false, false, false, false)
+            }
+        }
+    }
+}

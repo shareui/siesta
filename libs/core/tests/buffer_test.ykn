@@ -1,0 +1,164 @@
+#![lint::allow("unused_import")]
+
+load core.utils: assert
+load root.cell: Cell, init_cell, cells_equal
+load root.buffer: TerminalBuffer
+load root.diff: DoubleBuffer, DiffSpan, compute_diff_spans, force_redraw_all, resolve_color_fg, resolve_color_bg
+load root.layout: init_rect
+
+#[test]
+fun test_cell_init_and_equality() {
+    set c1 = init_cell("A", "red", "black", true)
+    set c2 = init_cell("A", "red", "black", true)
+    set c3 = init_cell("B", "red", "black", true)
+    set c4 = init_cell("A", "blue", "black", true)
+
+    assert(cells_equal(ref c1, ref c2))
+    assert(!cells_equal(ref c1, ref c3))
+    assert(!cells_equal(ref c1, ref c4))
+}
+
+#[test]
+fun test_buffer_operations() {
+    set buf = init TerminalBuffer(10, 5)
+    assert(buf.width == 10)
+    assert(buf.height == 5)
+    assert(buf.cells.len() == 50)
+
+    set empty_c = buf.get_cell(0, 0)
+    assert(empty_c.ch == " ")
+
+    buf.draw_text(2, 1, "Hi", "white", "black", true)
+    set c_h = buf.get_cell(2, 1)
+    set c_i = buf.get_cell(3, 1)
+    set c_after = buf.get_cell(4, 1)
+
+    assert(c_h.ch == "H")
+    assert(c_h.fg == "white")
+    assert(c_h.bold)
+    assert(c_i.ch == "i")
+    assert(c_after.ch == " ")
+
+    // clipping test
+    buf.draw_text(9, 1, "Overflow")
+    assert(buf.get_cell(9, 1).ch == "O")
+}
+
+#[test]
+fun test_diff_spans_coalescing() {
+    set front = init TerminalBuffer(20, 5)
+    set back = init TerminalBuffer(20, 5)
+
+    // identical buffers have 0 diff spans
+    set spans0 = compute_diff_spans(ref front, ref back)
+    assert(spans0.len() == 0)
+
+    // consecutive cells are coalesced into a single span
+    back.draw_text(2, 1, "Hello", "yellow", "blue", true)
+    set spans1 = compute_diff_spans(ref front, ref back)
+    assert(spans1.len() == 1)
+    assert(spans1[0].x == 2)
+    assert(spans1[0].y == 1)
+    assert(spans1[0].text == "Hello")
+    assert(spans1[0].fg == "yellow")
+    assert(spans1[0].bg == "blue")
+    assert(spans1[0].bold)
+
+    // discontinuous cells create separate spans
+    back.draw_text(12, 1, "World", "yellow", "blue", true)
+    set spans2 = compute_diff_spans(ref front, ref back)
+    assert(spans2.len() == 2)
+    assert(spans2[0].text == "Hello")
+    assert(spans2[1].x == 12)
+    assert(spans2[1].text == "World")
+}
+
+#[test]
+fun test_double_buffer_swap() {
+    set db = init DoubleBuffer(10, 5)
+    db.back_buffer.draw_text(0, 0, "Title")
+
+    set spans = compute_diff_spans(ref db.front_buffer, ref db.back_buffer)
+    assert(spans.len() == 1)
+
+    db.swap()
+    set c_front = db.front_buffer.get_cell(0, 0)
+    assert(c_front.ch == "T")
+
+    set spans_after = compute_diff_spans(ref db.front_buffer, ref db.back_buffer)
+    assert(spans_after.len() == 0)
+}
+
+#[test]
+fun test_dirty_lines_and_force_redraw() {
+    set db = init DoubleBuffer(10, 5)
+    assert(db.back_buffer.is_line_dirty(0))
+    assert(db.back_buffer.is_line_dirty(4))
+
+    db.back_buffer.reset_dirty()
+    assert(!db.back_buffer.is_line_dirty(0))
+    assert(!db.back_buffer.is_line_dirty(2))
+
+    // modifying line 2 marks it dirty
+    db.back_buffer.draw_text(1, 2, "Dirty")
+    assert(!db.back_buffer.is_line_dirty(0))
+    assert(db.back_buffer.is_line_dirty(2))
+
+    // diff only inspects dirty line
+    set spans = compute_diff_spans(ref db.front_buffer, ref db.back_buffer)
+    assert(spans.len() == 1)
+    assert(spans[0].y == 2)
+
+    // after swap, dirty is reset
+    db.swap()
+    assert(!db.back_buffer.is_line_dirty(2))
+
+    // force redraw marks all lines dirty again
+    force_redraw_all(ref db)
+    assert(db.back_buffer.is_line_dirty(0))
+    assert(db.back_buffer.is_line_dirty(4))
+}
+
+#[test]
+fun test_buffer_clipping_scissoring() {
+    set buf = init TerminalBuffer(20, 10)
+    assert(!buf.has_clip())
+
+    // push clip rect [2..6) on x and [2..4) on y
+    buf.push_clip(init_rect(2, 2, 4, 2))
+    assert(buf.has_clip())
+    assert(buf.is_clipped(0, 0))
+    assert(!buf.is_clipped(3, 2))
+    assert(buf.is_clipped(10, 2))
+
+    // draw text across boundary: should only paint within [2..6)
+    buf.draw_text(0, 2, "0123456789")
+    assert(buf.get_cell(0, 2).ch == " ")
+    assert(buf.get_cell(1, 2).ch == " ")
+    assert(buf.get_cell(2, 2).ch == "2")
+    assert(buf.get_cell(3, 2).ch == "3")
+    assert(buf.get_cell(4, 2).ch == "4")
+    assert(buf.get_cell(5, 2).ch == "5")
+    assert(buf.get_cell(6, 2).ch == " ")
+
+    // pop clip
+    set popped = buf.pop_clip()
+    assert(popped != null)
+    assert(!buf.has_clip())
+}
+
+#[test]
+fun test_palette_color_caching() {
+    // fast path palette colors
+    set fg_catppuccin = resolve_color_fg("#1e1e2e")
+    assert(fg_catppuccin == "\x1b[38;2;30;30;46m")
+
+    set bg_catppuccin = resolve_color_bg("#181825")
+    assert(bg_catppuccin == "\x1b[48;2;24;24;37m")
+
+    set fg_red = resolve_color_fg("red")
+    assert(fg_red == "\x1b[38;2;205;49;49m")
+
+    set bg_default = resolve_color_bg("default")
+    assert(bg_default == "")
+}

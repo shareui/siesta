@@ -1,0 +1,21 @@
+version = 1
+target = "x86_64-unknown-linux-gnu"
+compiler = "0.1.0"
+profile = "debug"
+
+[[package]]
+name = "siesta_core"
+version = "0.1.0"
+kind = "static"
+source = "path+../core"
+checksum = "blake3:3850e5f38bc461e5e158b6214c4bb92bb022ade151bfc6842abf32aabf6fa97f"
+features = ["default"]
+
+[[package]]
+name = "siestaloader"
+version = "0.1.0"
+kind = "macro"
+source = "root"
+checksum = "blake3:e5d53ba70259020ec27a03b365948529fb8338b8d6b237edef56ae4c79da58fd"
+features = ["default"]
+dependencies = ["siesta_core"]

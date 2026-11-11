@@ -1,0 +1,217 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.itermtool.key: KEY_CHAR, KEY_ENTER, KEY_BACKSPACE, KEY_LEFT, KEY_RIGHT, KEY_HOME, KEY_END, KEY_DELETE, KEY_SPACE
+load ..buffer: TerminalBuffer
+
+public class InputWidget {
+    public id: string
+    public value: string
+    public cursor_pos: int32
+    public placeholder: string
+    public max_len: int32
+    public password: bool
+    public mask_char: string
+    public focused: bool
+    public disabled: bool
+    public submitted: bool
+
+    public fun init(id: string, initial_value: string = "", placeholder: string = "", max_len: int32 = 256, password: bool = false, mask_char: string = "*") {
+        rewrite this.id = id
+        rewrite this.value = initial_value
+        rewrite this.cursor_pos = cast(initial_value.len(), "int32")
+        rewrite this.placeholder = placeholder
+        rewrite this.max_len = max_len
+        rewrite this.password = password
+        rewrite this.mask_char = mask_char
+        rewrite this.focused = false
+        rewrite this.disabled = false
+        rewrite this.submitted = false
+    }
+
+    public fun set_text(new_val: string) -> InputWidget {
+        rewrite this.value = new_val
+        rewrite this.cursor_pos = cast(new_val.len(), "int32")
+        return this
+    }
+
+    public fun insert_char(ch: string) -> InputWidget {
+        if this.disabled {
+            return this
+        }
+        if this.max_len > 0 && cast(this.value.len(), "int32") >= this.max_len {
+            return this
+        }
+        if this.cursor_pos <= 0 {
+            rewrite this.value = ch + this.value
+            rewrite this.cursor_pos = 1
+            return this
+        }
+        set total = cast(this.value.len(), "int32")
+        if this.cursor_pos >= total {
+            rewrite this.value = this.value + ch
+            rewrite this.cursor_pos = this.cursor_pos + 1
+            return this
+        }
+        set pos = cast(this.cursor_pos, "int64")
+        set prefix = this.value[0..pos]
+        set suffix = this.value[pos..this.value.len()]
+        rewrite this.value = prefix + ch + suffix
+        rewrite this.cursor_pos = this.cursor_pos + 1
+        return this
+    }
+
+    public fun backspace() -> InputWidget {
+        if this.disabled || this.cursor_pos <= 0 || this.value.len() == 0 {
+            return this
+        }
+        set total = cast(this.value.len(), "int32")
+        if this.cursor_pos >= total {
+            rewrite this.value = this.value[0..this.value.len() - 1]
+            rewrite this.cursor_pos = this.cursor_pos - 1
+            return this
+        }
+        if this.cursor_pos == 1 {
+            rewrite this.value = this.value[1..this.value.len()]
+            rewrite this.cursor_pos = 0
+            return this
+        }
+        set pos = cast(this.cursor_pos, "int64")
+        set prefix = this.value[0..pos - 1]
+        set suffix = this.value[pos..this.value.len()]
+        rewrite this.value = prefix + suffix
+        rewrite this.cursor_pos = this.cursor_pos - 1
+        return this
+    }
+
+    public fun delete_char() -> InputWidget {
+        if this.disabled {
+            return this
+        }
+        set total = cast(this.value.len(), "int32")
+        if this.cursor_pos >= total {
+            return this
+        }
+        if this.cursor_pos == 0 {
+            rewrite this.value = this.value[1..this.value.len()]
+            return this
+        }
+        set pos = cast(this.cursor_pos, "int64")
+        set prefix = this.value[0..pos]
+        set suffix = this.value[pos + 1..this.value.len()]
+        rewrite this.value = prefix + suffix
+        return this
+    }
+
+    public fun move_left() -> InputWidget {
+        if this.cursor_pos > 0 {
+            rewrite this.cursor_pos = this.cursor_pos - 1
+        }
+        return this
+    }
+
+    public fun move_right() -> InputWidget {
+        set total = cast(this.value.len(), "int32")
+        if this.cursor_pos < total {
+            rewrite this.cursor_pos = this.cursor_pos + 1
+        }
+        return this
+    }
+
+    public fun move_home() -> InputWidget {
+        rewrite this.cursor_pos = 0
+        return this
+    }
+
+    public fun move_end() -> InputWidget {
+        rewrite this.cursor_pos = cast(this.value.len(), "int32")
+        return this
+    }
+
+    public fun display_text() -> string {
+        if this.value.len() == 0 {
+            if !this.focused && this.placeholder.len() > 0 {
+                return this.placeholder
+            }
+            return ""
+        }
+        if !this.password {
+            return this.value
+        }
+        set masked: string = ""
+        for i in 0..this.value.len() {
+            rewrite masked = masked + this.mask_char
+        }
+        return masked
+    }
+
+    public fun handle_key(code: int32, char_val: string = "") -> bool {
+        if this.disabled {
+            return false
+        }
+        if code == KEY_LEFT {
+            this.move_left()
+            return true
+        }
+        if code == KEY_RIGHT {
+            this.move_right()
+            return true
+        }
+        if code == KEY_HOME {
+            this.move_home()
+            return true
+        }
+        if code == KEY_END {
+            this.move_end()
+            return true
+        }
+        if code == KEY_BACKSPACE || code == 8 || code == 127 {
+            this.backspace()
+            return true
+        }
+        if code == KEY_DELETE {
+            this.delete_char()
+            return true
+        }
+        if code == KEY_ENTER || code == 10 || code == 13 {
+            rewrite this.submitted = true
+            return true
+        }
+        if code == KEY_SPACE || code == 32 {
+            this.insert_char(" ")
+            return true
+        }
+        if code == KEY_CHAR && char_val.len() > 0 {
+            this.insert_char(char_val)
+            return true
+        }
+        return false
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, width: int32) {
+        if width <= 0 { return }
+        
+        set shown = this.display_text()
+        set is_placeholder = (this.value.len() == 0 && !this.focused)
+        set fg = "default"
+        set dim = false
+        if is_placeholder || this.disabled {
+            rewrite dim = true
+        }
+        if this.focused {
+            rewrite fg = "cyan"
+        }
+
+        buf.draw_text(x, y, shown, fg, "default", false, dim, false, false, false)
+
+        // cursor highlight when focused
+        if this.focused && !this.disabled {
+            set cur_x = x + this.cursor_pos
+            if cur_x < x + width {
+                set cell = buf.get_cell(cur_x, y)
+                rewrite cell.reversed = true
+                buf.set_cell(cur_x, y, cell)
+            }
+        }
+    }
+}

@@ -1,0 +1,44 @@
+extern dataScreen
+
+screen dataScreen {
+  shortcuts {
+    "z": onPrev
+    "x": onNext
+    "q": onQuit
+    "?": onHelp
+  }
+  col {
+    block(border: rounded, title: "Microservice Topology", fg: "#cdd6f4", bg: "#181825", borderFg: "#89b4fa", borderBg: "#181825") {
+      x: 1
+      y: 1
+      width: 44
+      height: 21
+    }
+    tree(x: 3, y: 2, width: 40, height: 18, fg: "#cdd6f4", bg: "#181825", dirFg: "#89b4fa", activeFg: "#ffffff", activeBg: "#313244")
+
+    block(border: rounded, title: "Live Node Inventory Table", fg: "#cdd6f4", bg: "#181825", borderFg: "#a6e3a1", borderBg: "#181825", hideBelow: 96) {
+      x: 46
+      y: 1
+      width: 52
+      height: 21
+    }
+    text("POD NAME         ROLE        STATUS     LATENCY", x: 48, y: 2, fg: "#89b4fa", bg: "#181825", bold: true, hideBelow: 96)
+    divider(x: 48, y: 3, width: 47, fg: "#45475a", bg: "#181825", hideBelow: 96)
+    text("auth-srv-01      OAuth/SSO   Running     1.4 ms", x: 48, y: 4, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("auth-srv-02      OAuth/SSO   Running     1.6 ms", x: 48, y: 5, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("gateway-api-01   Envoy/TLS   Running     0.8 ms", x: 48, y: 6, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("gateway-api-02   Envoy/TLS   Running     0.9 ms", x: 48, y: 7, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("billing-core-01  PostgreSQL  Running     4.2 ms", x: 48, y: 8, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("billing-worker   Celery/MQ   Running     2.8 ms", x: 48, y: 9, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("cache-redis-01   InMemory    Running     0.3 ms", x: 48, y: 10, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("telemetry-otel   Collector   Running     1.1 ms", x: 48, y: 11, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("ingress-edge-01  HAProxy     Running     0.4 ms", x: 48, y: 12, fg: "#a6e3a1", bg: "#181825", hideBelow: 96)
+    text("analytics-etl-1  Worker      Standby     --    ", x: 48, y: 13, fg: "#585b70", bg: "#181825", hideBelow: 96)
+    text("analytics-etl-2  Worker      Standby     --    ", x: 48, y: 14, fg: "#585b70", bg: "#181825", hideBelow: 96)
+    text("backup-agent-01  CronJob     Scheduled   --    ", x: 48, y: 15, fg: "#585b70", bg: "#181825", hideBelow: 96)
+    scrollbar(total: 100, viewport: 12, position: 15, x: 96, y: 3, height: 16, hideBelow: 96)
+    divider(x: 48, y: 16, width: 47, fg: "#45475a", bg: "#181825", hideBelow: 96)
+    text("Total items: 12 pods | Running: 9 | Standby: 3", x: 48, y: 17, fg: "#585b70", bg: "#181825", dim: true, hideBelow: 96)
+    text("Page 1 of 3 | Use mouse wheel or PgUp/PgDn", x: 48, y: 18, fg: "#585b70", bg: "#181825", dim: true, hideBelow: 96)
+  }
+}

@@ -1,0 +1,42 @@
+#![lint::allow("unused_import")]
+
+load core.utils: assert, cast
+load std.io: println
+load siesta_core: SiestaApp, Screen, Dialog, LayoutContext, TerminalBuffer, TableWidget, CanvasWidget, ProgressWidget
+
+
+
+class DemoFacadeScreen extends Screen {
+    public fun init() {
+        super("DemoFacadeScreen")
+        rewrite this.draw_fn = fun(ref buf: TerminalBuffer) {
+            buf.draw_text(1, 1, "Facade Screen Ready", "cyan", "default", true, false, false, false, false)
+        }
+    }
+}
+
+#[test]
+fun test_facade_exports_and_app_wiring() {
+    set app = init SiestaApp(70, 20)
+    assert(app.width == 70)
+    assert(app.height == 20)
+
+    set scr = init DemoFacadeScreen()
+    app.mount_screen(scr)
+
+    set rendered = app.render_frame()
+    assert(rendered > 0)
+    set c = app.double_buf.front_buffer.get_cell(1, 1)
+    assert(c.ch == "F")
+
+    set table = init TableWidget("test_tbl")
+    table.add_column("Col A", cast(10, "int32"), "left")
+    assert(table.columns.len() == 1)
+
+    set canvas = init CanvasWidget("test_cvs", 10, 5)
+    canvas.set_pixel(1, 1, true)
+    assert(canvas.width == 10)
+
+    set prog = init ProgressWidget(50.0)
+    assert(prog.value == 50.0)
+}

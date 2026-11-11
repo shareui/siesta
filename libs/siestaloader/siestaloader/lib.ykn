@@ -1,0 +1,134 @@
+#![lint::allow("unused_import")]
+
+load macrosdk: MacroRunner, MacroContext, TokenStream, token_stream
+load std.fs.paths: path_join
+load std.fs.files: file_exists, file_read_text, file_write_text
+load std.strings: split, trim
+
+public load .errors: SiestaError, siesta_error, format_siesta_error
+public load .tokens: Token, init_token
+public load .ast: SpesModule, ThemeDef, ThemeToken, ComponentDef, DialogDef, ScreenDef, WidgetNode, PropDef, StateFieldDef, ShortcutDef, UseImport, init_spes_module, init_widget_node
+public load .lexer: SpesLexer
+public load .parser: SpesParser
+public load .locales: LocaleCatalog, LocaleItem, LocaleTranslation, parse_locales_toml
+public load .graph: ModuleGraph
+public load .typecheck: validate_widget_tree
+public load .semantic: SemanticAnalyzer, SemanticResult
+public load .codegen: SpesCodegen
+public load .importer: find_module_file, resolve_module_imports, SpesEntry, SpesRegistry, build_registry_from_dirs, resolve_module_imports_with_registry
+
+fun main() {
+    set runner = init MacroRunner()
+    set _ = runner.register_attribute("siesta::res", expand_views)
+    set _ = runner.register_attribute("res", expand_views)
+    set _ = runner.run()
+}
+
+fun clean_arg(raw: string) -> string {
+    set res = trim(raw)
+    if res.len() >= 2 && res[0..1] == "\"" && res[res.len() - 1..res.len()] == "\"" {
+        return res[1..res.len() - 1]
+    }
+    return res
+}
+
+fun safe_compile_error(msg: string) -> string {
+    set clean: string = ""
+    for i in 0..msg.len() {
+        set ch = msg[i..i + 1]
+        if ch == "\"" {
+            rewrite clean = clean + "'"
+        } elif ch == "\n" || ch == "\r" {
+            rewrite clean = clean + " "
+        } else {
+            rewrite clean = clean + ch
+        }
+    }
+    return "compile_error!(\"" + clean + "\")\n"
+}
+
+fun resolve_file_path(working_dir: string, file_path: string) -> string {
+    if file_exists(file_path) {
+        return file_path
+    }
+    set joined = path_join(working_dir, file_path)
+    if file_exists(joined) {
+        return joined
+    }
+    set in_src = path_join(path_join(working_dir, "src"), file_path)
+    if file_exists(in_src) {
+        return in_src
+    }
+    return joined
+}
+
+#[region::capacity(4194304)]
+fun expand_views(ref ctx: MacroContext, input: TokenStream) -> TokenStream {
+    if ctx.attr_args.len() == 0 {
+        return input
+    }
+    set parts = split(ctx.attr_args, ",")
+    if parts.len() == 0 {
+        return input
+    }
+    set spes_file = clean_arg(parts[0])
+    set full_spes_path = resolve_file_path(ctx.working_dir, spes_file)
+    ctx.track_file(full_spes_path)
+
+    if !file_exists(full_spes_path) {
+        set err_formatted = "siesta spes error[0|0]: file not found: " + full_spes_path
+        ctx.error(err_formatted)
+        return token_stream(safe_compile_error(err_formatted))
+    }
+    set spes_content = file_read_text(full_spes_path)
+
+    set catalog: LocaleCatalog? = null
+    if parts.len() > 1 {
+        set loc_file = clean_arg(parts[1])
+        set full_loc_path = resolve_file_path(ctx.working_dir, loc_file)
+        ctx.track_file(full_loc_path)
+        if file_exists(full_loc_path) {
+            set toml_content = file_read_text(full_loc_path)
+            rewrite catalog = parse_locales_toml(toml_content)
+        }
+    }
+
+    sus {
+        set parser = init SpesParser(spes_content)
+        set module_def = parser.parse_module()
+        set in_stack: string[] = []
+        set tracked_files: string[] = []
+        resolve_module_imports(ref module_def, full_spes_path, ctx.working_dir, ref in_stack, ref tracked_files)
+        for i in 0..tracked_files.len() {
+            ctx.track_file(tracked_files[i])
+        }
+
+        for i in 0..module_def.screens.len() {
+            for j in 0..module_def.screens[i].root_widgets.len() {
+                validate_widget_tree(ref module_def.screens[i].root_widgets[j])
+            }
+        }
+        for i in 0..module_def.dialogs.len() {
+            for j in 0..module_def.dialogs[i].root_widgets.len() {
+                validate_widget_tree(ref module_def.dialogs[i].root_widgets[j])
+            }
+        }
+        for i in 0..module_def.components.len() {
+            for j in 0..module_def.components[i].root_widgets.len() {
+                validate_widget_tree(ref module_def.components[i].root_widgets[j])
+            }
+        }
+
+        set codegen = init SpesCodegen("en")
+        set gen_code = codegen.generate_module(module_def, catalog)
+        return token_stream(gen_code)
+    } catch e: SiestaError {
+        set err_formatted = format_siesta_error(e)
+        ctx.error(err_formatted)
+        return token_stream(safe_compile_error(err_formatted))
+    } catch {
+        set err_formatted = "siesta spes error[0|0]: ${errkind}"
+        ctx.error(err_formatted)
+        return token_stream(safe_compile_error(err_formatted))
+    }
+}

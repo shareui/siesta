@@ -1,0 +1,12 @@
+version = 1
+target = "x86_64-unknown-linux-gnu"
+compiler = "0.1.0"
+profile = "debug"
+
+[[package]]
+name = "siesta_core"
+version = "0.1.0"
+kind = "static"
+source = "root"
+checksum = "blake3:e6fbca8538498d879ab36750767a640c4113f7812362a760fdb4ab74b2a63dc8"
+features = ["default"]

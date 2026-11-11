@@ -1,0 +1,169 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load .easing: sample_easing
+
+public class Transition {
+    public from_val: float64
+    public to_val: float64
+    public duration_ms: int64
+    public start_time_ms: int64
+    public easing: string
+    public is_active: bool
+
+    public fun init(from_val: float64, to_val: float64, duration_ms: int64, start_time_ms: int64 = 0, easing: string = "linear") {
+        rewrite this.from_val = from_val
+        rewrite this.to_val = to_val
+        rewrite this.duration_ms = duration_ms
+        rewrite this.start_time_ms = start_time_ms
+        rewrite this.easing = easing
+        rewrite this.is_active = true
+    }
+
+    public fun start(start_time_ms: int64) {
+        rewrite this.start_time_ms = start_time_ms
+        rewrite this.is_active = true
+    }
+
+    public fun stop() {
+        rewrite this.is_active = false
+    }
+
+    public fun is_finished(now_ms: int64) -> bool {
+        if !this.is_active {
+            return true
+        }
+        return now_ms >= this.start_time_ms + this.duration_ms
+    }
+
+    public fun progress(now_ms: int64) -> float64 {
+        if !this.is_active || this.duration_ms <= 0 {
+            return 1.0
+        }
+        if now_ms <= this.start_time_ms {
+            return 0.0
+        }
+        set elapsed = now_ms - this.start_time_ms
+        if elapsed >= this.duration_ms {
+            return 1.0
+        }
+        return cast(elapsed, "float64") / cast(this.duration_ms, "float64")
+    }
+
+    public fun sample(now_ms: int64) -> float64 {
+        if !this.is_active {
+            return this.to_val
+        }
+        set p = this.progress(now_ms)
+        if p >= 1.0 {
+            return this.to_val
+        }
+        if p <= 0.0 {
+            return this.from_val
+        }
+        set factor = sample_easing(this.easing, p)
+        return this.from_val + (this.to_val - this.from_val) * factor
+    }
+}
+
+public class Pulse {
+    public min_val: float64
+    public max_val: float64
+    public period_ms: int64
+    public start_time_ms: int64
+    public is_active: bool
+
+    public fun init(min_val: float64, max_val: float64, period_ms: int64, start_time_ms: int64 = 0) {
+        rewrite this.min_val = min_val
+        rewrite this.max_val = max_val
+        rewrite this.period_ms = period_ms
+        rewrite this.start_time_ms = start_time_ms
+        rewrite this.is_active = true
+    }
+
+    public fun sample(now_ms: int64) -> float64 {
+        if !this.is_active || this.period_ms <= 0 {
+            return this.min_val
+        }
+        set elapsed = (now_ms - this.start_time_ms) % this.period_ms
+        set half_period = this.period_ms / 2
+        if half_period <= 0 {
+            return this.min_val
+        }
+        if elapsed < half_period {
+            set t = cast(elapsed, "float64") / cast(half_period, "float64")
+            return this.min_val + (this.max_val - this.min_val) * t
+        }
+        set t = cast(elapsed - half_period, "float64") / cast(half_period, "float64")
+        return this.max_val - (this.max_val - this.min_val) * t
+    }
+}
+
+public class Slide {
+    public from_x: int32
+    public from_y: int32
+    public to_x: int32
+    public to_y: int32
+    public duration_ms: int64
+    public start_time_ms: int64
+    public easing: string
+    public is_active: bool
+
+    public fun init(from_x: int32, from_y: int32, to_x: int32, to_y: int32, duration_ms: int64, start_time_ms: int64 = 0, easing: string = "ease_out") {
+        rewrite this.from_x = from_x
+        rewrite this.from_y = from_y
+        rewrite this.to_x = to_x
+        rewrite this.to_y = to_y
+        rewrite this.duration_ms = duration_ms
+        rewrite this.start_time_ms = start_time_ms
+        rewrite this.easing = easing
+        rewrite this.is_active = true
+    }
+
+    public fun progress(now_ms: int64) -> float64 {
+        if !this.is_active || this.duration_ms <= 0 {
+            return 1.0
+        }
+        if now_ms <= this.start_time_ms {
+            return 0.0
+        }
+        set elapsed = now_ms - this.start_time_ms
+        if elapsed >= this.duration_ms {
+            return 1.0
+        }
+        return cast(elapsed, "float64") / cast(this.duration_ms, "float64")
+    }
+
+    public fun sample_x(now_ms: int64) -> int32 {
+        if !this.is_active {
+            return this.to_x
+        }
+        set p = this.progress(now_ms)
+        if p >= 1.0 {
+            return this.to_x
+        }
+        set factor = sample_easing(this.easing, p)
+        set dx = cast(this.to_x - this.from_x, "float64")
+        return this.from_x + cast(dx * factor, "int32")
+    }
+
+    public fun sample_y(now_ms: int64) -> int32 {
+        if !this.is_active {
+            return this.to_y
+        }
+        set p = this.progress(now_ms)
+        if p >= 1.0 {
+            return this.to_y
+        }
+        set factor = sample_easing(this.easing, p)
+        set dy = cast(this.to_y - this.from_y, "float64")
+        return this.from_y + cast(dy * factor, "int32")
+    }
+
+    public fun is_finished(now_ms: int64) -> bool {
+        if !this.is_active {
+            return true
+        }
+        return now_ms >= this.start_time_ms + this.duration_ms
+    }
+}

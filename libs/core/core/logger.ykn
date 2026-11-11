@@ -1,0 +1,54 @@
+#![lint::allow("unused_import")]
+
+load core.macro: get_profileconfig
+load std.fs.files: file_write_text, file_append_text
+load std.io: println
+
+static ACTIVE_PROFILE: string = get_profileconfig!()
+
+public fun is_debug_profile() -> bool {
+    return ACTIVE_PROFILE == "debug"
+}
+
+public fun log_init(file_path: string = "log.txt") {
+    if is_debug_profile() {
+        sus {
+            file_write_text(file_path, "=== DEBUG LOG STARTED [profile=" + ACTIVE_PROFILE + "] ===\n")
+        } catch {
+            set _ = errkind
+        }
+    }
+}
+
+public fun log_debug(msg: string) {
+    if is_debug_profile() {
+        sus {
+            file_append_text("log.txt", msg + "\n")
+        } catch {
+            println("${errkind}")
+        }
+    }
+}
+
+public class Logger {
+    public enabled: bool
+    public path: string
+
+    public fun init(path: string = "log.txt") {
+        rewrite this.enabled = is_debug_profile()
+        rewrite this.path = path
+        if this.enabled {
+            log_init(this.path)
+        }
+    }
+
+    public fun log(msg: string) {
+        if this.enabled {
+            sus {
+                file_append_text(this.path, msg + "\n")
+            } catch {
+                println("${errkind}")
+            }
+        }
+    }
+}

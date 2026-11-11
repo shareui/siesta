@@ -1,0 +1,167 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.itermtool.key: KEY_UP, KEY_DOWN, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_ENTER
+load ..buffer: TerminalBuffer
+
+public class ListWidget {
+    public id: string
+    public items: string[]
+    public selected_index: int32
+    public scroll_offset: int32
+    public visible_rows: int32
+    public focused: bool
+
+    public fun init(id: string, visible_rows: int32 = 10) {
+        set empty_items: string[] = []
+        rewrite this.id = id
+        rewrite this.items = empty_items
+        rewrite this.selected_index = 0
+        rewrite this.scroll_offset = 0
+        rewrite this.visible_rows = visible_rows
+        rewrite this.focused = false
+    }
+
+    public fun add_item(item: string) -> ListWidget {
+        this.items.push(item)
+        return this
+    }
+
+    public fun count() -> int32 {
+        return cast(this.items.len(), "int32")
+    }
+
+    public fun get_selected() -> string {
+        if this.selected_index >= 0 && this.selected_index < this.count() {
+            return this.items[cast(this.selected_index, "int64")]
+        }
+        return ""
+    }
+
+    public fun ensure_visible() {
+        if this.selected_index < this.scroll_offset {
+            rewrite this.scroll_offset = this.selected_index
+        } else {
+            if this.selected_index >= this.scroll_offset + this.visible_rows {
+                rewrite this.scroll_offset = this.selected_index - this.visible_rows + 1
+            }
+        }
+        if this.scroll_offset < 0 {
+            rewrite this.scroll_offset = 0
+        }
+    }
+
+    public fun select(idx: int32) {
+        if idx >= 0 && idx < this.count() {
+            rewrite this.selected_index = idx
+            this.ensure_visible()
+        }
+    }
+
+    public fun move_up() {
+        if this.selected_index > 0 {
+            rewrite this.selected_index = this.selected_index - 1
+            this.ensure_visible()
+        }
+    }
+
+    public fun move_down() {
+        if this.selected_index < this.count() - 1 {
+            rewrite this.selected_index = this.selected_index + 1
+            this.ensure_visible()
+        }
+    }
+
+    public fun page_up() {
+        set target = this.selected_index - this.visible_rows
+        if target < 0 {
+            rewrite target = 0
+        }
+        this.select(target)
+    }
+
+    public fun page_down() {
+        set target = this.selected_index + this.visible_rows
+        if target >= this.count() {
+            rewrite target = this.count() - 1
+        }
+        this.select(target)
+    }
+
+    public fun move_home() {
+        this.select(0)
+    }
+
+    public fun move_end() {
+        this.select(this.count() - 1)
+    }
+
+    public fun handle_key(code: int32) -> bool {
+        if this.count() == 0 {
+            return false
+        }
+        if code == KEY_UP {
+            this.move_up()
+            return true
+        }
+        if code == KEY_DOWN {
+            this.move_down()
+            return true
+        }
+        if code == KEY_PAGE_UP {
+            this.page_up()
+            return true
+        }
+        if code == KEY_PAGE_DOWN {
+            this.page_down()
+            return true
+        }
+        if code == KEY_HOME {
+            this.move_home()
+            return true
+        }
+        if code == KEY_END {
+            this.move_end()
+            return true
+        }
+        return false
+    }
+
+    public fun visible_start() -> int32 {
+        return this.scroll_offset
+    }
+
+    public fun visible_count() -> int32 {
+        set remaining = this.count() - this.scroll_offset
+        if remaining < this.visible_rows {
+            if remaining < 0 { return 0 }
+            
+            return remaining
+        }
+        return this.visible_rows
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, width: int32) {
+        set start = this.visible_start()
+        set num = this.visible_count()
+        for i in 0..num {
+            set offset = cast(i, "int32")
+            set item_idx = start + offset
+            set cur_y = y + offset
+            set text = this.items[cast(item_idx, "int64")]
+            set is_sel = (item_idx == this.selected_index)
+            set prefix = "  "
+            set fg = "default"
+            set bg = "default"
+            set reversed = false
+            if is_sel {
+                rewrite prefix = "> "
+                rewrite fg = "white"
+                rewrite bg = "blue"
+                rewrite reversed = true
+            }
+            set line = prefix + text
+            buf.draw_text(x, cur_y, line, fg, bg, is_sel, false, false, false, reversed)
+        }
+    }
+}

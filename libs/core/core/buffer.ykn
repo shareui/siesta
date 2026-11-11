@@ -1,0 +1,247 @@
+load core.mem: persistent
+load core.utils: cast
+load .cell: Cell, init_cell
+load .layout.rect: Rect
+
+static 
+    ASCII_TABLE: 
+    string = 
+    "                                 !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~ "
+
+fun to_static_ch(text: string, i: int64, ref ~step: int64) -> string {
+    set b: uint8 = text[i]
+    if b < 128 {
+        rewrite step = 1
+        set b_idx = cast(b, "int64")
+        return ASCII_TABLE[b_idx..b_idx + 1]
+    }
+    if b >= 192 && b < 224 {
+        if i + 2 <= text.len() {
+            rewrite step = 2
+            return text[i..i + 2]
+        }
+    }
+    if b >= 224 && b < 240 {
+        if i + 3 <= text.len() {
+            set slice3 = text[i..i + 3]
+            if slice3 == "│" { rewrite step = 3; return "│" }
+            if slice3 == "─" { rewrite step = 3; return "─" }
+            if slice3 == "╭" { rewrite step = 3; return "╭" }
+            if slice3 == "╮" { rewrite step = 3; return "╮" }
+            if slice3 == "╯" { rewrite step = 3; return "╯" }
+            if slice3 == "╰" { rewrite step = 3; return "╰" }
+            if slice3 == "┌" { rewrite step = 3; return "┌" }
+            if slice3 == "┐" { rewrite step = 3; return "┐" }
+            if slice3 == "└" { rewrite step = 3; return "└" }
+            if slice3 == "┘" { rewrite step = 3; return "┘" }
+            if slice3 == "█" { rewrite step = 3; return "█" }
+            if slice3 == "▀" { rewrite step = 3; return "▀" }
+            if slice3 == "▄" { rewrite step = 3; return "▄" }
+            if slice3 == "░" { rewrite step = 3; return "░" }
+            if slice3 == "▒" { rewrite step = 3; return "▒" }
+            if slice3 == "▓" { rewrite step = 3; return "▓" }
+            if slice3 == "▲" { rewrite step = 3; return "▲" }
+            if slice3 == "▼" { rewrite step = 3; return "▼" }
+            if slice3 == "▶" { rewrite step = 3; return "▶" }
+            if slice3 == "═" { rewrite step = 3; return "═" }
+            if slice3 == "║" { rewrite step = 3; return "║" }
+            if slice3 == "╔" { rewrite step = 3; return "╔" }
+            if slice3 == "╗" { rewrite step = 3; return "╗" }
+            if slice3 == "╚" { rewrite step = 3; return "╚" }
+            if slice3 == "╝" { rewrite step = 3; return "╝" }
+            if slice3 == "━" { rewrite step = 3; return "━" }
+            if slice3 == "┃" { rewrite step = 3; return "┃" }
+            if slice3 == "┏" { rewrite step = 3; return "┏" }
+            if slice3 == "┓" { rewrite step = 3; return "┓" }
+            if slice3 == "┗" { rewrite step = 3; return "┗" }
+            if slice3 == "┛" { rewrite step = 3; return "┛" }
+            if slice3 == "▏" { rewrite step = 3; return "▏" }
+            if slice3 == "▎" { rewrite step = 3; return "▎" }
+            if slice3 == "▍" { rewrite step = 3; return "▍" }
+            if slice3 == "▌" { rewrite step = 3; return "▌" }
+            if slice3 == "▋" { rewrite step = 3; return "▋" }
+            if slice3 == "▊" { rewrite step = 3; return "▊" }
+            if slice3 == "▉" { rewrite step = 3; return "▉" }
+            if slice3 == " " { rewrite step = 3; return " " }
+            if slice3 == "▂" { rewrite step = 3; return "▂" }
+            if slice3 == "▃" { rewrite step = 3; return "▃" }
+            if slice3 == "▅" { rewrite step = 3; return "▅" }
+            if slice3 == "▆" { rewrite step = 3; return "▆" }
+            if slice3 == "▇" { rewrite step = 3; return "▇" }
+            rewrite step = 3
+            return slice3
+        }
+    }
+    if b >= 240 {
+        if i + 4 <= text.len() {
+            rewrite step = 4
+            return text[i..i + 4]
+        }
+    }
+    rewrite step = 1
+    return " "
+}
+
+public class TerminalBuffer {
+    public width: int32
+    public height: int32
+    public cells: Cell[]
+    public dirty_lines: bool[]
+    public clip_stack: Rect[]
+
+    public fun init(width: int32, height: int32, fill_ch: string = " ") {
+        rewrite this.width = width
+        rewrite this.height = height
+        set count = width * height
+        set list: Cell[] = []
+        for i in 0..count {
+            list.push(init_cell(fill_ch, "default", "default", false, false, false, false, false))
+        }
+        rewrite this.cells = persistent(list)
+
+        set dl: bool[] = []
+        for r in 0..height {
+            dl.push(true)
+        }
+        rewrite this.dirty_lines = persistent(dl)
+        set empty_clips: Rect[] = []
+        rewrite this.clip_stack = persistent(empty_clips)
+    }
+
+    public fun mark_line_dirty(y: int32) {
+        if y >= 0 && y < this.height {
+            rewrite this.dirty_lines[cast(y, "int64")] = true
+        }
+    }
+
+    public fun mark_all_dirty() {
+        for i in 0..this.dirty_lines.len() {
+            rewrite this.dirty_lines[i] = true
+        }
+    }
+
+    public fun reset_dirty() {
+        for i in 0..this.dirty_lines.len() {
+            rewrite this.dirty_lines[i] = false
+        }
+    }
+
+    public fun is_line_dirty(y: int32) -> bool {
+        if y >= 0 && y < this.height {
+            return this.dirty_lines[cast(y, "int64")]
+        }
+        return false
+    }
+
+    public fun push_clip(r: Rect) {
+        this.clip_stack.push(r)
+    }
+
+    public fun pop_clip() -> Rect? {
+        if this.clip_stack.len() > 0 {
+            set last = this.clip_stack[this.clip_stack.len() - 1]
+            this.clip_stack.pop()
+            return last
+        }
+        return null
+    }
+
+    public fun has_clip() -> bool {
+        return this.clip_stack.len() > 0
+    }
+
+    public fun current_clip() -> Rect? {
+        if this.clip_stack.len() > 0 {
+            return this.clip_stack[this.clip_stack.len() - 1]
+        }
+        return null
+    }
+
+    public fun is_clipped(x: int32, y: int32) -> bool {
+        if this.clip_stack.len() == 0 {
+            return false
+        }
+        set r = this.clip_stack[this.clip_stack.len() - 1]
+        return x < r.x || x >= r.x + r.width || y < r.y || y >= r.y + r.height
+    }
+
+    public fun in_bounds(x: int32, y: int32) -> bool {
+        return x >= 0 && x < this.width && y >= 0 && y < this.height
+    }
+
+    public fun get_index(x: int32, y: int32) -> int32 {
+        return y * this.width + x
+    }
+
+    public fun get_cell(x: int32, y: int32) -> Cell {
+        if !this.in_bounds(x, y) {
+            return init_cell(" ", "default", "default", false, false, false, false, false)
+        }
+        set idx = this.get_index(x, y)
+        return this.cells[cast(idx, "int64")]
+    }
+
+    public fun set_cell(x: int32, y: int32, cell: Cell) {
+        if this.in_bounds(x, y) && !this.is_clipped(x, y) {
+            set idx = this.get_index(x, y)
+            rewrite this.cells[cast(idx, "int64")] = cell
+            this.mark_line_dirty(y)
+        }
+    }
+
+    public fun draw_text(x: int32, y: int32, text: string, fg: string = "default", bg: string = "default", bold: bool = false, dim: bool = false, italic: bool = false, underline: bool = false, reversed: bool = false) {
+        if y < 0 || y >= this.height {
+            return
+        }
+        set i: int64 = 0
+        set cur_x = x
+        while i < text.len() {
+            if cur_x >= this.width {
+                break
+            }
+            set step: int64 = 1
+            set ch = to_static_ch(text, i, ref ~step)
+            if cur_x >= 0 {
+                set cell = init_cell(ch, fg, bg, bold, dim, italic, underline, reversed)
+                this.set_cell(cur_x, y, cell)
+            }
+            rewrite cur_x = cur_x + 1
+            rewrite i = i + step
+        }
+    }
+
+    public fun draw_str(x: int32, y: int32, text: string) {
+        this.draw_text(x, y, text, "default", "default", false, false, false, false, false)
+    }
+
+    public fun draw_styled(x: int32, y: int32, text: string, fg: string, bg: string = "default", bold: bool = false) {
+        this.draw_text(x, y, text, fg, bg, bold, false, false, false, false)
+    }
+
+    public fun fill(cell: Cell) {
+        for i in 0..this.cells.len() {
+            rewrite this.cells[i] = cell
+        }
+        this.mark_all_dirty()
+    }
+
+    public fun clear() {
+        this.fill(init_cell(" ", "default", "default", false, false, false, false, false))
+    }
+
+    public fun resize(new_w: int32, new_h: int32) {
+        rewrite this.width = new_w
+        rewrite this.height = new_h
+        set total = new_w * new_h
+        set new_cells: Cell[] = []
+        for i in 0..total {
+            new_cells.push(init_cell(" ", "default", "default", false, false, false, false, false))
+        }
+        rewrite this.cells = persistent(new_cells)
+        set new_dl: bool[] = []
+        for r in 0..new_h {
+            new_dl.push(true)
+        }
+        rewrite this.dirty_lines = persistent(new_dl)
+    }
+}

@@ -1,0 +1,47 @@
+extern overviewScreen
+
+screen overviewScreen {
+  shortcuts {
+    "z": onPrev
+    "x": onNext
+    "q": onQuit
+    "?": onHelp
+  }
+  col {
+    block(border: rounded, title: "Host System Resources", fg: "#cdd6f4", bg: "#181825", borderFg: "#a6e3a1", borderBg: "#181825") {
+      x: 1
+      y: 1
+      width: 48
+      height: 11
+    }
+    text("CPU Core Cluster (8 Cores @ 3.8 GHz)", x: 3, y: 2, fg: "#89b4fa", bg: "#181825", bold: true)
+    gauge(percent: 68.0, label: "68%", fg: "#89b4fa", bg: "#181825", x: 3, y: 3, width: 44, height: 2)
+    text("Memory Pool (Allocated: 14.2 GB / 32.0 GB)", x: 3, y: 5, fg: "#a6e3a1", bg: "#181825", bold: true)
+    lineGauge(ratio: 0.44, label: "44%", fg: "#a6e3a1", bg: "#181825", x: 3, y: 6, width: 44)
+    text("Disk Cache Dirty Ratio: 12% | Swap: 0%", x: 3, y: 8, fg: "#585b70", bg: "#181825", dim: true)
+    text("Uptime: 18 days, 4 hours, 22 mins", x: 3, y: 9, fg: "#585b70", bg: "#181825", dim: true)
+
+    block(border: rounded, title: "Network & Traffic Telemetry", fg: "#cdd6f4", bg: "#181825", borderFg: "#f9e2af", borderBg: "#181825", hideBelow: 96) {
+      x: 50
+      y: 1
+      width: 48
+      height: 11
+    }
+    text("Network Ingress Packets (kpps)", x: 52, y: 2, fg: "#f9e2af", bg: "#181825", bold: true, hideBelow: 96)
+    sparkline(max: 100, fg: "#f9e2af", bg: "#181825", x: 52, y: 3, width: 44, hideBelow: 96)
+    text("Cluster Node Traffic Distribution", x: 52, y: 5, fg: "#89b4fa", bg: "#181825", bold: true, hideBelow: 96)
+    barchart(max: 100, width: 4, gap: 2, fg: "#89b4fa", bg: "#181825", x: 52, y: 6, width: 44, height: 5, hideBelow: 96)
+
+    block(border: rounded, title: "Cluster Diagnostics & Node Health", fg: "#cdd6f4", bg: "#181825", borderFg: "#585b70", borderBg: "#181825", minHeight: 22) {
+      x: 1
+      y: 12
+      width: 97
+      height: 10
+    }
+    paragraph("Distributed cluster telemetry stream. High-frequency counters monitored across all active nodes via kernel eBPF probes. Memory pools synchronized through Raft consensus engine. Zero packet drop recorded over the last 72 hours.", wrap: word, align: left, fg: "#cdd6f4", bg: "#181825", x: 3, y: 13, width: 93, height: 3, minHeight: 22)
+    text("Active Nodes: 5/5   |   Leader: node-alpha   |   Quorum: Synced   |   Health: 100%", x: 3, y: 17, fg: "#a6e3a1", bg: "#181825", bold: true, minHeight: 22)
+    divider(x: 3, y: 18, width: 93, fg: "#45475a", bg: "#181825", minHeight: 22)
+    text("Navigation: press 'z' for previous screen, 'x' for next screen, '?' for help", x: 3, y: 19, fg: "#585b70", bg: "#181825", dim: true, minHeight: 22)
+    text("Telemetry updated every 500ms via distributed eBPF agents", x: 3, y: 20, fg: "#585b70", bg: "#181825", dim: true, minHeight: 22)
+  }
+}

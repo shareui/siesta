@@ -1,0 +1,39 @@
+version = 1
+target = "x86_64-unknown-linux-gnu"
+compiler = "0.1.0"
+profile = "debug"
+
+[[package]]
+name = "res"
+version = "0.1.0"
+kind = "macro"
+source = "path+../siestaloader"
+checksum = "blake3:cdaa7f7daf4d0834cd23c6db49ba281f4525c375ac0eed1318ad8b68a20e5300"
+features = ["default"]
+
+[[package]]
+name = "res_siesta_core"
+version = "0.1.0"
+kind = "static"
+source = "path+/home/shareui/dev/yuki-lang/source/offlibs/siesta/libs/siesta/../siestaloader/../core"
+checksum = "blake3:2531076a67a2bddff2f46771737fbed8fabb06dc768398851a9113e6c46d9532"
+
+[[package]]
+name = "siesta"
+version = "0.1.0"
+kind = "static"
+source = "root"
+checksum = "blake3:bd454765c008c32e4884d4fc444c7916daaab1750cbf061b2f076a0a95c2f16e"
+features = ["default"]
+dependencies = [
+    "siesta_core",
+    "res",
+]
+
+[[package]]
+name = "siesta_core"
+version = "0.1.0"
+kind = "static"
+source = "path+../core"
+checksum = "blake3:3850e5f38bc461e5e158b6214c4bb92bb022ade151bfc6842abf32aabf6fa97f"
+features = ["default"]

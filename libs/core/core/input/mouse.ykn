@@ -1,0 +1,206 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+public load ..layout.rect: Rect, rect_contains
+public load std.itermtool.mouse: MOUSE_BTN_LEFT, MOUSE_BTN_MIDDLE, MOUSE_BTN_RIGHT, MOUSE_BTN_NONE
+public load std.itermtool.mouse: MOUSE_DOWN, MOUSE_UP, MOUSE_DRAG, MOUSE_MOVE
+public load std.itermtool.mouse: MOUSE_SCROLL_UP, MOUSE_SCROLL_DOWN, MOUSE_SCROLL_LEFT, MOUSE_SCROLL_RIGHT
+public load std.itermtool.mouse: MouseEvent
+
+public fun is_point_inside(rect: Rect, x: int32, y: int32) -> bool {
+    return rect_contains(rect, x, y)
+}
+
+public class MouseTarget {
+    public id: string
+    public bounds: Rect
+    public z_index: int32
+    public enabled: bool
+
+    public fun init(id: string, bounds: Rect, z_index: int32 = 0, enabled: bool = true) {
+        rewrite this.id = id
+        rewrite this.bounds = bounds
+        rewrite this.z_index = z_index
+        rewrite this.enabled = enabled
+    }
+}
+
+public class MouseDispatchResult {
+    public target_id: string
+    public action: int32
+    public x: int32
+    public y: int32
+    public handled: bool
+
+    public fun init(target_id: string, action: int32, x: int32, y: int32, handled: bool) {
+        rewrite this.target_id = target_id
+        rewrite this.action = action
+        rewrite this.x = x
+        rewrite this.y = y
+        rewrite this.handled = handled
+    }
+}
+
+public class MouseRouter {
+    public targets: MouseTarget[]
+    public active_target_id: string
+    public is_dragging: bool
+    public drag_start_x: int32
+    public drag_start_y: int32
+    public last_x: int32
+    public last_y: int32
+
+    public fun init() {
+        set empty_targets: MouseTarget[] = []
+        rewrite this.targets = empty_targets
+        rewrite this.active_target_id = ""
+        rewrite this.is_dragging = false
+        rewrite this.drag_start_x = 0
+        rewrite this.drag_start_y = 0
+        rewrite this.last_x = 0
+        rewrite this.last_y = 0
+    }
+
+    public fun register_target(target: MouseTarget) {
+        for i in 0..this.targets.len() {
+            if this.targets[i].id == target.id {
+                rewrite this.targets[i] = target
+                return
+            }
+        }
+        this.targets.push(target)
+    }
+
+    public fun unregister_target(id: string) -> bool {
+        set found_index: int32 = -1
+        for i in 0..this.targets.len() {
+            if this.targets[i].id == id {
+                rewrite found_index = cast(i, "int32")
+            }
+        }
+        if found_index < 0 {
+            return false
+        }
+        for i in cast(found_index, "int64")..this.targets.len() - 1 {
+            rewrite this.targets[i] = this.targets[i + 1]
+        }
+        this.targets.pop()
+        if this.active_target_id == id {
+            rewrite this.active_target_id = ""
+            rewrite this.is_dragging = false
+        }
+        return true
+    }
+
+    public fun clear_targets() {
+        set empty_targets: MouseTarget[] = []
+        rewrite this.targets = empty_targets
+        rewrite this.active_target_id = ""
+        rewrite this.is_dragging = false
+    }
+
+    public fun find_target_at(x: int32, y: int32) -> MouseTarget? {
+        set best_idx: int32 = -1
+        set best_z: int32 = -999999
+        for i in 0..this.targets.len() {
+            set t = this.targets[i]
+            if t.enabled && rect_contains(t.bounds, x, y) {
+                if t.z_index >= best_z {
+                    rewrite best_idx = cast(i, "int32")
+                    rewrite best_z = t.z_index
+                }
+            }
+        }
+        if best_idx >= 0 {
+            return this.targets[best_idx]
+        }
+        return null
+    }
+
+    public fun find_target_id_at(x: int32, y: int32) -> string {
+        set best_idx: int32 = -1
+        set best_z: int32 = -999999
+        for i in 0..this.targets.len() {
+            set t = this.targets[i]
+            if t.enabled && rect_contains(t.bounds, x, y) {
+                if t.z_index >= best_z {
+                    rewrite best_idx = cast(i, "int32")
+                    rewrite best_z = t.z_index
+                }
+            }
+        }
+        if best_idx >= 0 {
+            return this.targets[best_idx].id
+        }
+        return ""
+    }
+
+    public fun dispatch_down(x: int32, y: int32) -> MouseDispatchResult {
+        set target_id = this.find_target_id_at(x, y)
+        if target_id != "" {
+            rewrite this.active_target_id = target_id
+            rewrite this.drag_start_x = x
+            rewrite this.drag_start_y = y
+            rewrite this.last_x = x
+            rewrite this.last_y = y
+            rewrite this.is_dragging = false
+            return init MouseDispatchResult(target_id, MOUSE_DOWN, x, y, true)
+        }
+        rewrite this.active_target_id = ""
+        rewrite this.is_dragging = false
+        return init MouseDispatchResult("", MOUSE_DOWN, x, y, false)
+    }
+
+    public fun dispatch_drag_move(action: int32, x: int32, y: int32) -> MouseDispatchResult {
+        rewrite this.last_x = x
+        rewrite this.last_y = y
+        if this.active_target_id != "" {
+            rewrite this.is_dragging = true
+            return init MouseDispatchResult(this.active_target_id, MOUSE_DRAG, x, y, true)
+        }
+        set target_id = this.find_target_id_at(x, y)
+        if target_id != "" {
+            return init MouseDispatchResult(target_id, action, x, y, true)
+        }
+        return init MouseDispatchResult("", action, x, y, false)
+    }
+
+    public fun dispatch_up(x: int32, y: int32) -> MouseDispatchResult {
+        if this.active_target_id != "" {
+            set tid = this.active_target_id
+            rewrite this.active_target_id = ""
+            rewrite this.is_dragging = false
+            return init MouseDispatchResult(tid, MOUSE_UP, x, y, true)
+        }
+        set target_id = this.find_target_id_at(x, y)
+        if target_id != "" {
+            return init MouseDispatchResult(target_id, MOUSE_UP, x, y, true)
+        }
+        return init MouseDispatchResult("", MOUSE_UP, x, y, false)
+    }
+
+    public fun dispatch_scroll(action: int32, x: int32, y: int32) -> MouseDispatchResult {
+        set target_id = this.find_target_id_at(x, y)
+        if target_id != "" {
+            return init MouseDispatchResult(target_id, action, x, y, true)
+        }
+        return init MouseDispatchResult("", action, x, y, false)
+    }
+
+    public fun dispatch_raw(kind: int32, button: int32, x: int32, y: int32) -> MouseDispatchResult {
+        if kind == MOUSE_DOWN {
+            return this.dispatch_down(x, y)
+        }
+        if kind == MOUSE_DRAG || kind == MOUSE_MOVE {
+            return this.dispatch_drag_move(kind, x, y)
+        }
+        if kind == MOUSE_UP {
+            return this.dispatch_up(x, y)
+        }
+        return this.dispatch_scroll(kind, x, y)
+    }
+
+    public fun dispatch_event(event: MouseEvent) -> MouseDispatchResult {
+        return this.dispatch_raw(event.kind, event.button, event.x, event.y)
+    }
+}

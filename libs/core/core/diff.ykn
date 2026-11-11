@@ -1,0 +1,298 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.io: print, flush
+load .cell: Cell, cells_equal, styles_equal
+load .buffer: TerminalBuffer
+load .logger: log_debug
+
+public struct DiffSpan {
+    x: int32
+    y: int32
+    text: string
+    fg: string
+    bg: string
+    bold: bool
+    dim: bool
+    italic: bool
+    underline: bool
+    reversed: bool
+}
+
+public fun compute_diff_spans(ref front: TerminalBuffer, ref back: TerminalBuffer) -> DiffSpan[] {
+    set spans: DiffSpan[] = []
+    set h: int32 = if front.height < back.height { front.height } else { back.height }
+    set w: int32 = if front.width < back.width { front.width } else { back.width }
+    for y in 0..h {
+        set yi = cast(y, "int32")
+        if !back.is_line_dirty(yi) {
+            continue
+        }
+        set x: int32 = 0
+        while x < w {
+            set fc = front.get_cell(x, yi)
+            set bc = back.get_cell(x, yi)
+            if !cells_equal(ref fc, ref bc) {
+                set start_x = x
+                set span_text: string = bc.ch
+                set style_cell = bc
+                rewrite x = x + 1
+                while x < w {
+                    set next_fc = front.get_cell(x, yi)
+                    set next_bc = back.get_cell(x, yi)
+                    if !cells_equal(ref next_fc, ref next_bc) && styles_equal(ref style_cell, ref next_bc) {
+                        rewrite span_text = span_text + next_bc.ch
+                        rewrite x = x + 1
+                    } else {
+                        break
+                    }
+                }
+                spans.push(DiffSpan {
+                    x: start_x,
+                    y: yi,
+                    text: span_text,
+                    fg: style_cell.fg,
+                    bg: style_cell.bg,
+                    bold: style_cell.bold,
+                    dim: style_cell.dim,
+                    italic: style_cell.italic,
+                    underline: style_cell.underline,
+                    reversed: style_cell.reversed
+                })
+            } else {
+                rewrite x = x + 1
+            }
+        }
+    }
+    return spans
+}
+
+public fun parse_hex_channel(s: string) -> int32 {
+    set res: int32 = 0
+    for i in 0..s.len() {
+        set b: uint8 = s[i]
+        set digit: int32 = 0
+        if b >= 48 && b <= 57 {
+            rewrite digit = cast(b - 48, "int32")
+        } elif b >= 97 && b <= 102 {
+            rewrite digit = cast(b - 97 + 10, "int32")
+        } elif b >= 65 && b <= 70 {
+            rewrite digit = cast(b - 65 + 10, "int32")
+        }
+        rewrite res = res * 16 + digit
+    }
+    return res
+}
+
+public fun resolve_color_fg(col: string) -> string {
+    if col.len() == 0 || col == "default" {
+        return ""
+    }
+    if col == "red" { return "\x1b[38;2;205;49;49m" }
+    if col == "green" { return "\x1b[38;2;13;188;121m" }
+    if col == "yellow" { return "\x1b[38;2;229;229;16m" }
+    if col == "blue" { return "\x1b[38;2;36;114;200m" }
+    if col == "white" { return "\x1b[38;2;255;255;255m" }
+    if col == "black" { return "\x1b[38;2;0;0;0m" }
+    if col == "cyan" { return "\x1b[38;2;17;168;205m" }
+    if col == "magenta" { return "\x1b[38;2;188;63;188m" }
+    if col == "#1e1e2e" { return "\x1b[38;2;30;30;46m" }
+    if col == "#181825" { return "\x1b[38;2;24;24;37m" }
+    if col == "#11111b" { return "\x1b[38;2;17;17;27m" }
+    if col == "#313244" { return "\x1b[38;2;49;50;68m" }
+    if col == "#45475a" { return "\x1b[38;2;69;71;90m" }
+    if col == "#585b70" { return "\x1b[38;2;88;91;112m" }
+    if col == "#89b4fa" { return "\x1b[38;2;137;180;250m" }
+    if col == "#cdd6f4" { return "\x1b[38;2;205;214;244m" }
+    if col == "#f9e2af" { return "\x1b[38;2;249;226;175m" }
+    if col == "#a6adc8" { return "\x1b[38;2;166;173;200m" }
+    if col == "#a6e3a1" { return "\x1b[38;2;166;227;161m" }
+    if col == "#f38ba8" { return "\x1b[38;2;243;139;168m" }
+    if col == "#fab387" { return "\x1b[38;2;250;179;135m" }
+    if col.len() == 7 && col[0..1] == "#" {
+        set r = parse_hex_channel(col[1..3])
+        set g = parse_hex_channel(col[3..5])
+        set b = parse_hex_channel(col[5..7])
+        return "\x1b[38;2;" + cast(r, "string") + ";" + cast(g, "string") + ";" + cast(b, "string") + "m"
+    }
+    return ""
+}
+
+public fun resolve_color_bg(col: string) -> string {
+    if col.len() == 0 || col == "default" {
+        return ""
+    }
+    if col == "red" { return "\x1b[48;2;205;49;49m" }
+    if col == "green" { return "\x1b[48;2;13;188;121m" }
+    if col == "yellow" { return "\x1b[48;2;229;229;16m" }
+    if col == "blue" { return "\x1b[48;2;36;114;200m" }
+    if col == "white" { return "\x1b[48;2;255;255;255m" }
+    if col == "black" { return "\x1b[48;2;0;0;0m" }
+    if col == "cyan" { return "\x1b[48;2;17;168;205m" }
+    if col == "magenta" { return "\x1b[48;2;188;63;188m" }
+    if col == "#1e1e2e" { return "\x1b[48;2;30;30;46m" }
+    if col == "#181825" { return "\x1b[48;2;24;24;37m" }
+    if col == "#11111b" { return "\x1b[48;2;17;17;27m" }
+    if col == "#313244" { return "\x1b[48;2;49;50;68m" }
+    if col == "#45475a" { return "\x1b[48;2;69;71;90m" }
+    if col == "#585b70" { return "\x1b[48;2;88;91;112m" }
+    if col == "#89b4fa" { return "\x1b[48;2;137;180;250m" }
+    if col == "#cdd6f4" { return "\x1b[48;2;205;214;244m" }
+    if col == "#f9e2af" { return "\x1b[48;2;249;226;175m" }
+    if col == "#a6adc8" { return "\x1b[48;2;166;173;200m" }
+    if col == "#a6e3a1" { return "\x1b[48;2;166;227;161m" }
+    if col == "#f38ba8" { return "\x1b[48;2;243;139;168m" }
+    if col == "#fab387" { return "\x1b[48;2;250;179;135m" }
+    if col.len() == 7 && col[0..1] == "#" {
+        set r = parse_hex_channel(col[1..3])
+        set g = parse_hex_channel(col[3..5])
+        set b = parse_hex_channel(col[5..7])
+        return "\x1b[48;2;" + cast(r, "string") + ";" + cast(g, "string") + ";" + cast(b, "string") + "m"
+    }
+    return ""
+}
+
+public fun move_to(x: int32, y: int32) {
+    print("\x1b[" + cast(y + 1, "string") + ";" + cast(x + 1, "string") + "H")
+}
+
+public fun print_styled_at(x: int32, y: int32, text: string, fg_seq: string, bg_seq: string) {
+    move_to(x, y)
+    print(fg_seq + bg_seq + text + "\x1b[0m")
+}
+
+public fun flush_diff_spans(ref spans: DiffSpan[]) {
+    set cur_fg: string = ""
+    set cur_bg: string = ""
+    set cur_bold: bool = false
+    set cur_dim: bool = false
+    set cur_italic: bool = false
+    set cur_underline: bool = false
+    set cur_reversed: bool = false
+
+    for i in 0..spans.len() {
+        set span = spans[i]
+        move_to(span.x, span.y)
+
+        // check if an active attribute must be turned off
+        set need_reset: bool = (cur_bold && !span.bold) || (cur_dim && !span.dim) || (cur_italic && !span.italic) || (cur_underline && !span.underline) || (cur_reversed && !span.reversed)
+        if need_reset {
+            print("\x1b[0m")
+            rewrite cur_fg = ""
+            rewrite cur_bg = ""
+            rewrite cur_bold = false
+            rewrite cur_dim = false
+            rewrite cur_italic = false
+            rewrite cur_underline = false
+            rewrite cur_reversed = false
+        }
+
+        // apply new attributes
+        if span.bold && !cur_bold {
+            print("\x1b[1m")
+            rewrite cur_bold = true
+        }
+        if span.dim && !cur_dim {
+            print("\x1b[2m")
+            rewrite cur_dim = true
+        }
+        if span.italic && !cur_italic {
+            print("\x1b[3m")
+            rewrite cur_italic = true
+        }
+        if span.underline && !cur_underline {
+            print("\x1b[4m")
+            rewrite cur_underline = true
+        }
+        if span.reversed && !cur_reversed {
+            print("\x1b[7m")
+            rewrite cur_reversed = true
+        }
+
+        // apply foreground color if changed
+        if span.fg != cur_fg {
+            set fg_seq = resolve_color_fg(span.fg)
+            if fg_seq.len() > 0 {
+                print(fg_seq)
+            }
+            rewrite cur_fg = span.fg
+        }
+
+        // apply background color if changed
+        if span.bg != cur_bg {
+            set bg_seq = resolve_color_bg(span.bg)
+            if bg_seq.len() > 0 {
+                print(bg_seq)
+            }
+            rewrite cur_bg = span.bg
+        }
+
+        print(span.text)
+    }
+
+    if spans.len() > 0 {
+        print("\x1b[0m")
+        flush()
+    }
+}
+
+public class DoubleBuffer {
+    public front_buffer: TerminalBuffer
+    public back_buffer: TerminalBuffer
+    public width: int32
+    public height: int32
+
+    public fun init(width: int32, height: int32) {
+        rewrite this.width = width
+        rewrite this.height = height
+        rewrite this.front_buffer = init TerminalBuffer(width, height)
+        rewrite this.back_buffer = init TerminalBuffer(width, height)
+    }
+
+    public fun resize(new_w: int32, new_h: int32) {
+        rewrite this.width = new_w
+        rewrite this.height = new_h
+        this.front_buffer.resize(new_w, new_h)
+        this.back_buffer.resize(new_w, new_h)
+    }
+
+    public fun swap() {
+        set w = this.width
+        set h = this.height
+        for y in 0..h {
+            set yi = cast(y, "int32")
+            if this.back_buffer.is_line_dirty(yi) {
+                set offset = yi * w
+                for x in 0..w {
+                    set xi = cast(x, "int32")
+                    set idx = offset + xi
+                    rewrite this.front_buffer.cells[idx] = this.back_buffer.cells[idx]
+                }
+            }
+        }
+        this.back_buffer.reset_dirty()
+    }
+
+    public fun mark_all_dirty() {
+        this.back_buffer.mark_all_dirty()
+    }
+
+    public fun force_redraw_all() {
+        this.back_buffer.mark_all_dirty()
+        for i in 0..this.front_buffer.cells.len() {
+            rewrite this.front_buffer.cells[i] = init_cell("\x00", "", "", false, false, false, false, false)
+        }
+    }
+
+    public fun diff_and_flush() -> int32 {
+        set spans = compute_diff_spans(ref this.front_buffer, ref this.back_buffer)
+        log_debug("[diff_and_flush] computed " + cast(spans.len(), "string") + " diff spans")
+        flush_diff_spans(ref spans)
+        this.swap()
+        return cast(spans.len(), "int32")
+    }
+}
+
+public fun force_redraw_all(ref db: DoubleBuffer) {
+    db.force_redraw_all()
+}

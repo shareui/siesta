@@ -1,0 +1,124 @@
+public struct UseImport {
+    module_id: string
+    is_wildcard: bool
+    symbols: string[]
+}
+
+public struct ThemeToken {
+    key: string
+    val: string
+}
+
+public struct ThemeDef {
+    name: string
+    is_adaptive: bool
+    tokens: ThemeToken[]
+}
+
+public struct PropDef {
+    name: string
+    type_name: string
+    default_val: string
+    has_default: bool
+}
+
+public struct StateFieldDef {
+    name: string
+    type_name: string
+    initial_val: string
+}
+
+public struct WidgetProp {
+    key: string
+    val: string
+}
+
+public struct WidgetEvent {
+    name: string
+    handler: string
+}
+
+public struct WidgetNode {
+    kind: string
+    props: WidgetProp[]
+    events: WidgetEvent[]
+    children: WidgetNode[]
+    id_attr: string
+    anim_expr: string
+    pos_arg: string
+}
+
+public struct ShortcutDef {
+    key_combo: string
+    action_name: string
+}
+
+public struct ComponentDef {
+    name: string
+    props: PropDef[]
+    state_fields: StateFieldDef[]
+    shortcuts: ShortcutDef[]
+    root_widgets: WidgetNode[]
+}
+
+public struct DialogDef {
+    name: string
+    props: PropDef[]
+    state_fields: StateFieldDef[]
+    shortcuts: ShortcutDef[]
+    size_w: int32
+    size_h: int32
+    border: string
+    border_color: string
+    bg: string
+    is_modal: bool
+    dim_backdrop: bool
+    root_widgets: WidgetNode[]
+}
+
+public struct ScreenDef {
+    name: string
+    state_fields: StateFieldDef[]
+    shortcuts: ShortcutDef[]
+    root_widgets: WidgetNode[]
+}
+
+public struct SpesModule {
+    module_id: string
+    imports: UseImport[]
+    themes: ThemeDef[]
+    components: ComponentDef[]
+    dialogs: DialogDef[]
+    screens: ScreenDef[]
+}
+
+public fun init_widget_node(kind: string, pos_arg: string = "") -> WidgetNode {
+    set empty_props: WidgetProp[] = []
+    set empty_events: WidgetEvent[] = []
+    set empty_children: WidgetNode[] = []
+    return WidgetNode {
+        kind: kind,
+        props: empty_props,
+        events: empty_events,
+        children: empty_children,
+        id_attr: "",
+        anim_expr: "",
+        pos_arg: pos_arg
+    }
+}
+
+public fun init_spes_module(module_id: string) -> SpesModule {
+    set empty_imports: UseImport[] = []
+    set empty_themes: ThemeDef[] = []
+    set empty_components: ComponentDef[] = []
+    set empty_dialogs: DialogDef[] = []
+    set empty_screens: ScreenDef[] = []
+    return SpesModule {
+        module_id: module_id,
+        imports: empty_imports,
+        themes: empty_themes,
+        components: empty_components,
+        dialogs: empty_dialogs,
+        screens: empty_screens
+    }
+}

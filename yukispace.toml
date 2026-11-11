@@ -1,0 +1,10 @@
+[workspace]
+name = "siesta"
+members = [
+    "libs/*",
+    "apps/*",
+]
+
+[workspace.build]
+archives = []
+system = []

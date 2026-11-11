@@ -1,0 +1,89 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+
+public fun fractional_block(remainder: int32) -> string {
+    if remainder == 7 { return "▉" }
+    if remainder == 6 { return "▊" }
+    if remainder == 5 { return "▋" }
+    if remainder == 4 { return "▌" }
+    if remainder == 3 { return "▍" }
+    if remainder == 2 { return "▎" }
+    if remainder == 1 { return "▏" }
+    return ""
+}
+
+public fun render_progress_string(value: float64, bar_width: int32) -> string {
+    if bar_width <= 0 { return "" }
+    
+    set clamped = value
+
+    if clamped < 0.0 {
+        rewrite clamped = 0.0
+    }
+    if clamped > 100.0 {
+        rewrite clamped = 100.0
+    }
+
+    set total_steps = bar_width * 8
+    set current_steps = cast(clamped * cast(total_steps, "float64") / 100.0, "int32")
+    set full_blocks = current_steps / 8
+    set remainder = current_steps % 8
+
+    set bar: string = ""
+    for i in 0..full_blocks {
+        rewrite bar = bar + "█"
+    }
+    if full_blocks < bar_width && remainder > 0 {
+        rewrite bar = bar + fractional_block(remainder)
+        set empty_count = bar_width - full_blocks - 1
+        for i in 0..empty_count {
+            rewrite bar = bar + "░"
+        }
+    } else {
+        set empty_count = bar_width - full_blocks
+        for i in 0..empty_count {
+            rewrite bar = bar + "░"
+        }
+    }
+    return bar
+}
+
+public class ProgressWidget {
+    public value: float64
+    public show_percentage: bool
+    public fg: string
+    public bg: string
+
+    public fun init(value: float64 = 0.0, show_percentage: bool = true, fg: string = "green", bg: string = "default") {
+        rewrite this.value = value
+        rewrite this.show_percentage = show_percentage
+        rewrite this.fg = fg
+        rewrite this.bg = bg
+    }
+
+    public fun set_value(v: float64) {
+        rewrite this.value = v
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, width: int32) {
+        if width <= 0 { return }
+
+        set bar_w = width
+        set pct_str: string = ""
+        if this.show_percentage {
+            set int_val = cast(this.value, "int32")
+            rewrite pct_str = " ${int_val}%"
+            rewrite bar_w = width - cast(pct_str.len(), "int32")
+        }
+        if bar_w < 1 {
+            rewrite bar_w = 1
+        }
+        set bar = render_progress_string(this.value, bar_w)
+        buf.draw_text(x, y, bar, this.fg, this.bg, false, false, false, false, false)
+        if this.show_percentage {
+            buf.draw_text(x + bar_w, y, pct_str, "default", "default", true, false, false, false, false)
+        }
+    }
+}

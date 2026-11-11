@@ -1,0 +1,55 @@
+public struct Cell {
+    ch: string
+    fg: string
+    bg: string
+    bold: bool
+    dim: bool
+    italic: bool
+    underline: bool
+    reversed: bool
+}
+
+public fun init_cell(
+    ch: string = " ", 
+    fg: string = "default", 
+    bg: string = "default", 
+    bold: bool = false, 
+    dim: bool = false, 
+    italic: bool = false, 
+    underline: bool = false, 
+    reversed: bool = false
+    ) -> Cell 
+
+    {
+    return Cell {
+        ch: ch,
+        fg: fg,
+        bg: bg,
+        bold: bold,
+        dim: dim,
+        italic: italic,
+        underline: underline,
+        reversed: reversed
+    }
+}
+
+public fun cells_equal(ref a: Cell, ref b: Cell) -> bool {
+    if a.ch != b.ch { return false }
+    if a.fg != b.fg || a.bg != b.bg { return false }
+    if a.bold != b.bold || a.dim != b.dim { return false }
+    if a.italic != b.italic 
+                || a.underline != b.underline 
+                || a.reversed != b.reversed { return false }
+    
+    return true
+}
+
+public fun styles_equal(ref a: Cell, ref b: Cell) -> bool {
+    if a.fg != b.fg || a.bg != b.bg { return false }
+    if a.bold != b.bold || a.dim != b.dim { return false }
+    if a.italic != b.italic 
+        || a.underline != b.underline 
+        || a.reversed != b.reversed { return false }
+    
+    return true
+}

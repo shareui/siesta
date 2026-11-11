@@ -1,0 +1,391 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.strings: split
+load std.itermtool.key: KEY_CHAR, KEY_ENTER, KEY_BACKSPACE, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_HOME, KEY_END, KEY_DELETE, KEY_SPACE
+load ..buffer: TerminalBuffer
+
+public class TextAreaWidget {
+    public id: string
+    public lines: string[]
+    public cursor_row: int32
+    public cursor_col: int32
+    public scroll_top: int32
+    public show_line_numbers: bool
+    public focused: bool
+    public disabled: bool
+
+    public fun init(id: string, initial_text: string = "", show_line_numbers: bool = true) {
+        set empty_lines: string[] = []
+        rewrite this.id = id
+        rewrite this.lines = empty_lines
+        rewrite this.cursor_row = 0
+        rewrite this.cursor_col = 0
+        rewrite this.scroll_top = 0
+        rewrite this.show_line_numbers = show_line_numbers
+        rewrite this.focused = false
+        rewrite this.disabled = false
+
+        if initial_text.len() == 0 {
+            set l: string[] = [""]
+            rewrite this.lines = l
+        } else {
+            set split_lines = split(initial_text, "\n")
+            rewrite this.lines = split_lines
+        }
+    }
+
+    public fun load_text(initial_text: string) -> TextAreaWidget {
+        rewrite this.cursor_row = 0
+        rewrite this.cursor_col = 0
+        rewrite this.scroll_top = 0
+        if initial_text.len() == 0 {
+            set l: string[] = [""]
+            rewrite this.lines = l
+        } else {
+            set split_lines = split(initial_text, "\n")
+            rewrite this.lines = split_lines
+        }
+        return this
+    }
+
+    public fun get_line_count() -> int32 {
+        return cast(this.lines.len(), "int32")
+    }
+
+    public fun get_text() -> string {
+        if this.lines.len() == 0 {
+            return ""
+        }
+        set res: string = ""
+        for i in 0..this.lines.len() {
+            if i > 0 {
+                rewrite res = res + "\n"
+            }
+            rewrite res = res + this.lines[i]
+        }
+        return res
+    }
+
+    public fun insert_char(ch: string) {
+        if this.disabled || this.lines.len() == 0 {
+            return
+        }
+        set r = cast(this.cursor_row, "int64")
+        if r >= this.lines.len() {
+            return
+        }
+        set line = this.lines[r]
+        set c = cast(this.cursor_col, "int64")
+        if c >= line.len() {
+            rewrite this.lines[r] = line + ch
+        } else {
+            set pfx = line[0..c]
+            set sfx = line[c..line.len()]
+            rewrite this.lines[r] = pfx + ch + sfx
+        }
+        rewrite this.cursor_col = this.cursor_col + 1
+    }
+
+    public fun insert_newline() -> TextAreaWidget {
+        if this.disabled || this.lines.len() == 0 {
+            return this
+        }
+        set r = cast(this.cursor_row, "int64")
+        if r >= this.lines.len() {
+            return this
+        }
+        set line = this.lines[r]
+        set c = cast(this.cursor_col, "int64")
+        set left: string = ""
+        set right: string = ""
+        if c < line.len() {
+            rewrite left = line[0..c]
+            rewrite right = line[c..line.len()]
+        } else {
+            rewrite left = line
+        }
+
+        set new_lines: string[] = []
+        for i in 0..this.lines.len() {
+            if i == r {
+                new_lines.push(left)
+                new_lines.push(right)
+            } else {
+                new_lines.push(this.lines[i])
+            }
+        }
+        rewrite this.lines = new_lines
+        rewrite this.cursor_row = this.cursor_row + 1
+        rewrite this.cursor_col = 0
+        return this
+    }
+
+    public fun backspace() {
+        if this.disabled || this.lines.len() == 0 {
+            return
+        }
+        set r = cast(this.cursor_row, "int64")
+        if this.cursor_col > 0 {
+            set line = this.lines[r]
+            set c = cast(this.cursor_col, "int64")
+            set pfx = line[0..c - 1]
+            set sfx = line[c..line.len()]
+            rewrite this.lines[r] = pfx + sfx
+            rewrite this.cursor_col = this.cursor_col - 1
+            return
+        }
+        // merge with previous line
+        if r > 0 {
+            set prev_line = this.lines[r - 1]
+            set cur_line = this.lines[r]
+            set prev_len = cast(prev_line.len(), "int32")
+            set new_lines: string[] = []
+            for i in 0..this.lines.len() {
+                if i == r - 1 {
+                    new_lines.push(prev_line + cur_line)
+                } elif i != r {
+                    new_lines.push(this.lines[i])
+                }
+            }
+            rewrite this.lines = new_lines
+            rewrite this.cursor_row = this.cursor_row - 1
+            rewrite this.cursor_col = prev_len
+        }
+    }
+
+    public fun move_up() {
+        if this.cursor_row > 0 {
+            rewrite this.cursor_row = this.cursor_row - 1
+            this.clamp_cursor_col()
+            if this.cursor_row < this.scroll_top {
+                rewrite this.scroll_top = this.cursor_row
+            }
+        }
+    }
+
+    public fun move_down(view_height: int32) {
+        set total = cast(this.lines.len(), "int32")
+        if this.cursor_row < total - 1 {
+            rewrite this.cursor_row = this.cursor_row + 1
+            this.clamp_cursor_col()
+            if this.cursor_row >= this.scroll_top + view_height {
+                rewrite this.scroll_top = this.cursor_row - view_height + 1
+            }
+        }
+    }
+
+    public fun move_left() {
+        if this.cursor_col > 0 {
+            rewrite this.cursor_col = this.cursor_col - 1
+        }
+    }
+
+    public fun move_right() {
+        set r = cast(this.cursor_row, "int64")
+        if r < this.lines.len() {
+            set line_len = cast(this.lines[r].len(), "int32")
+            if this.cursor_col < line_len {
+                rewrite this.cursor_col = this.cursor_col + 1
+            }
+        }
+    }
+
+    public fun move_home() {
+        rewrite this.cursor_col = 0
+    }
+
+    public fun move_end() {
+        set r = cast(this.cursor_row, "int64")
+        if r < this.lines.len() {
+            rewrite this.cursor_col = cast(this.lines[r].len(), "int32")
+        }
+    }
+
+    public fun clamp_cursor_col() {
+        set r = cast(this.cursor_row, "int64")
+        if r < this.lines.len() {
+            set line_len = cast(this.lines[r].len(), "int32")
+            if this.cursor_col > line_len {
+                rewrite this.cursor_col = line_len
+            }
+        }
+    }
+
+    public fun handle_key(code: int32, char_val: string = "", view_height: int32 = 10) -> bool {
+        if this.disabled {
+            return false
+        }
+        if code == KEY_UP {
+            this.move_up()
+            return true
+        }
+        if code == KEY_DOWN {
+            this.move_down(view_height)
+            return true
+        }
+        if code == KEY_LEFT {
+            this.move_left()
+            return true
+        }
+        if code == KEY_RIGHT {
+            this.move_right()
+            return true
+        }
+        if code == KEY_ENTER || code == 10 || code == 13 {
+            this.insert_newline()
+            return true
+        }
+        if code == KEY_BACKSPACE || code == 8 || code == 127 {
+            this.backspace()
+            return true
+        }
+        if code == KEY_SPACE || code == 32 {
+            this.insert_char(" ")
+            return true
+        }
+        if code == KEY_CHAR && char_val.len() > 0 {
+            this.insert_char(char_val)
+            return true
+        }
+        return false
+    }
+
+    public fun delete_char_at_cursor() {
+        if this.disabled || this.lines.len() == 0 {
+            return
+        }
+        set r = cast(this.cursor_row, "int64")
+        if r >= this.lines.len() {
+            return
+        }
+        set line = this.lines[r]
+        set c = cast(this.cursor_col, "int64")
+        if c < line.len() {
+            set pfx = line[0..c]
+            set sfx = line[c + 1..line.len()]
+            rewrite this.lines[r] = pfx + sfx
+            this.clamp_cursor_col()
+        }
+    }
+
+    public fun delete_current_line() {
+        if this.disabled || this.lines.len() == 0 {
+            return
+        }
+        if this.lines.len() == 1 {
+            rewrite this.lines[0] = ""
+            rewrite this.cursor_col = 0
+            return
+        }
+        set r = cast(this.cursor_row, "int64")
+        for i in r..this.lines.len() - 1 {
+            rewrite this.lines[i] = this.lines[i + 1]
+        }
+        this.lines.pop()
+        set total = cast(this.lines.len(), "int32")
+        if this.cursor_row >= total {
+            rewrite this.cursor_row = total - 1
+        }
+        this.clamp_cursor_col()
+    }
+
+    public fun insert_line_below() {
+        if this.disabled {
+            return
+        }
+        set r = cast(this.cursor_row, "int64")
+        this.lines.push("")
+        set last_idx = this.lines.len() - 1
+        for i in r + 1..last_idx {
+            set rev_idx = last_idx - (i - (r + 1))
+            rewrite this.lines[rev_idx] = this.lines[rev_idx - 1]
+        }
+        rewrite this.lines[r + 1] = ""
+        rewrite this.cursor_row = this.cursor_row + 1
+        rewrite this.cursor_col = 0
+    }
+
+    public fun set_cursor_from_click(click_x: int32, click_y: int32, view_x: int32, view_y: int32, view_h: int32) {
+        set rel_y = click_y - view_y
+        if rel_y < 0 || rel_y >= view_h {
+            return
+        }
+        set target_row = this.scroll_top + rel_y
+        set total = cast(this.lines.len(), "int32")
+        if target_row >= total {
+            rewrite target_row = total - 1
+        }
+        if target_row < 0 {
+            rewrite target_row = 0
+        }
+        rewrite this.cursor_row = target_row
+        set num_w: int32 = if this.show_line_numbers { cast(5, "int32") } else { cast(0, "int32") }
+        set rel_x = click_x - (view_x + num_w)
+        if rel_x < 0 {
+            rewrite rel_x = 0
+        }
+        set r = cast(this.cursor_row, "int64")
+        if r < this.lines.len() {
+            set line_len = cast(this.lines[r].len(), "int32")
+            if rel_x > line_len {
+                rewrite rel_x = line_len
+            }
+        }
+        rewrite this.cursor_col = rel_x
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, w: int32, h: int32, fg: string = "default", bg: string = "default", line_num_fg: string = "default", cursor_fg: string = "black", cursor_bg: string = "white") {
+        if w <= 0 || h <= 0 {
+            return
+        }
+        set total_lines = cast(this.lines.len(), "int32")
+        for row in 0..h {
+            set r_offset = cast(row, "int32")
+            set line_idx = this.scroll_top + r_offset
+            set cur_y = y + r_offset
+            set content_x = x
+            if this.show_line_numbers {
+                set num_str = "      "
+                if line_idx < total_lines {
+                    set pfx: string = if line_idx + 1 < 10 { " " } else { "" }
+                    rewrite num_str = pfx + "${line_idx + 1}" + " | "
+                }
+                buf.draw_text(x, cur_y, num_str, line_num_fg, bg, false, true, false, false, false)
+                rewrite content_x = x + 5
+            }
+            if line_idx >= total_lines {
+                buf.draw_text(content_x, cur_y, "~", "blue", bg, false, false, false, false, false)
+                set rem_w = w - (content_x - x) - 1
+                for sc in 0..rem_w {
+                    buf.draw_text(content_x + 1 + cast(sc, "int32"), cur_y, " ", fg, bg, false, false, false, false, false)
+                }
+            } else {
+                set line_content = this.lines[cast(line_idx, "int64")]
+                set max_content_w = w - (content_x - x)
+                if max_content_w > 0 {
+                    if cast(line_content.len(), "int32") > max_content_w {
+                        rewrite line_content = line_content[0..cast(max_content_w, "int64")]
+                    }
+                    buf.draw_text(content_x, cur_y, line_content, fg, bg, false, false, false, false, false)
+                    set pad_len = max_content_w - cast(line_content.len(), "int32")
+                    for pc in 0..pad_len {
+                        buf.draw_text(content_x + cast(line_content.len(), "int32") + cast(pc, "int32"), cur_y, " ", fg, bg, false, false, false, false, false)
+                    }
+                }
+                if this.focused && line_idx == this.cursor_row {
+                    set cursor_x = content_x + this.cursor_col
+                    if cursor_x < x + w {
+                        set cur_char = " "
+                        set r = cast(line_idx, "int64")
+                        set c = cast(this.cursor_col, "int64")
+                        if r < this.lines.len() && c < this.lines[r].len() {
+                            rewrite cur_char = this.lines[r][c..c + 1]
+                        }
+                        buf.draw_text(cursor_x, cur_y, cur_char, cursor_fg, cursor_bg, true, false, false, false, false)
+                    }
+                }
+            }
+        }
+    }
+}

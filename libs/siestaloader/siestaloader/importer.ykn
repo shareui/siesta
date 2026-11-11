@@ -1,0 +1,301 @@
+#![lint::allow("unused_import")]
+
+load core.panic: panic
+load std.fs.paths: path_join, path_parent, path_extension, path_canonicalize
+load std.fs.dirs: dir_walk, dir_exists
+load std.fs.files: file_exists, file_read_text
+
+load .ast: SpesModule, ThemeDef, ComponentDef, DialogDef, ScreenDef, UseImport, init_spes_module
+load .errors: siesta_error
+load .parser: SpesParser
+
+public struct SpesEntry {
+    file_path: string
+    module: SpesModule
+}
+
+fun norm_path(p: string) -> string {
+    if p.len() == 0 {
+        return ""
+    }
+    sus {
+        return path_canonicalize(p)
+    } catch {
+        if p.len() >= 2 && p[0..2] == "./" {
+            return p[2..p.len()]
+        }
+        return p
+    }
+}
+
+public class SpesRegistry {
+    public entries: SpesEntry[]
+
+    public fun init() {
+        set list: SpesEntry[] = []
+        rewrite this.entries = list
+    }
+
+    public fun register(file_path: string, module: SpesModule) {
+        set norm_fp = norm_path(file_path)
+        for i in 0..this.entries.len() {
+            if this.entries[i].module.module_id == module.module_id {
+                set norm_existing = norm_path(this.entries[i].file_path)
+                if norm_existing != norm_fp {
+                    set existing = this.entries[i].file_path
+                    panic(siesta_error("conflicting module identifier '" + module.module_id + "' defined in both '" + existing + "' and '" + file_path + "'", 1, 1, 114, "semantic"))
+                }
+                return
+            }
+        }
+        this.entries.push(SpesEntry { file_path: file_path, module: module })
+    }
+
+    public fun has(mod_id: string) -> bool {
+        for i in 0..this.entries.len() {
+            if this.entries[i].module.module_id == mod_id {
+                return true
+            }
+        }
+        return false
+    }
+
+    public fun get(mod_id: string) -> SpesModule? {
+        for i in 0..this.entries.len() {
+            if this.entries[i].module.module_id == mod_id {
+                return this.entries[i].module
+            }
+        }
+        return null
+    }
+
+    public fun get_path(mod_id: string) -> string {
+        for i in 0..this.entries.len() {
+            if this.entries[i].module.module_id == mod_id {
+                return this.entries[i].file_path
+            }
+        }
+        return ""
+    }
+}
+
+fun has_visited(ref list: string[], item: string) -> bool {
+    for i in 0..list.len() {
+        if list[i] == item {
+            return true
+        }
+    }
+    return false
+}
+
+public fun build_registry_from_dirs(dirs: string[]) -> SpesRegistry {
+    set registry = init SpesRegistry()
+    set visited_files: string[] = []
+
+    for d in 0..dirs.len() {
+        set dir_path = dirs[d]
+        if dir_path.len() > 0 && dir_exists(dir_path) {
+            set files = dir_walk(dir_path)
+            set spes_files: string[] = []
+            for f in 0..files.len() {
+                set raw_path = files[f]
+                if path_extension(raw_path) == "spes" && file_exists(raw_path) {
+                    set owned_path = "" + raw_path
+                    spes_files.push(owned_path)
+                }
+            }
+
+            for f in 0..spes_files.len() {
+                set fp = spes_files[f]
+                set norm_fp = norm_path(fp)
+                if !has_visited(ref visited_files, norm_fp) {
+                    visited_files.push(norm_fp)
+                    set content = file_read_text(fp)
+                    set parser = init SpesParser(content)
+                    set m = parser.parse_module()
+                    registry.register(fp, m)
+                }
+            }
+        }
+    }
+    return registry
+}
+
+public fun find_module_file(mod_id: string, current_file: string, working_dir: string) -> string {
+    set target_dir = path_parent(current_file)
+    if target_dir.len() == 0 || !dir_exists(target_dir) {
+        if working_dir.len() > 0 && dir_exists(path_join(working_dir, "src")) {
+            rewrite target_dir = path_join(working_dir, "src")
+        } elif working_dir.len() > 0 && dir_exists(working_dir) {
+            rewrite target_dir = working_dir
+        } else {
+            rewrite target_dir = "."
+        }
+    }
+    set dirs: string[] = [target_dir]
+    set reg = build_registry_from_dirs(dirs)
+    return reg.get_path(mod_id)
+}
+
+fun has_screen(ref m: SpesModule, name: string) -> bool {
+    for i in 0..m.screens.len() {
+        if m.screens[i].name == name {
+            return true
+        }
+    }
+    return false
+}
+
+fun has_component(ref m: SpesModule, name: string) -> bool {
+    for i in 0..m.components.len() {
+        if m.components[i].name == name {
+            return true
+        }
+    }
+    return false
+}
+
+fun has_dialog(ref m: SpesModule, name: string) -> bool {
+    for i in 0..m.dialogs.len() {
+        if m.dialogs[i].name == name {
+            return true
+        }
+    }
+    return false
+}
+
+fun has_theme(ref m: SpesModule, name: string) -> bool {
+    for i in 0..m.themes.len() {
+        if m.themes[i].name == name {
+            return true
+        }
+    }
+    return false
+}
+
+fun merge_screen(ref target: SpesModule, scr: ScreenDef) {
+    if !has_screen(ref target, scr.name) {
+        target.screens.push(scr)
+    }
+}
+
+fun merge_component(ref target: SpesModule, comp: ComponentDef) {
+    if !has_component(ref target, comp.name) {
+        target.components.push(comp)
+    }
+}
+
+fun merge_dialog(ref target: SpesModule, dlg: DialogDef) {
+    if !has_dialog(ref target, dlg.name) {
+        target.dialogs.push(dlg)
+    }
+}
+
+fun merge_theme(ref target: SpesModule, theme: ThemeDef) {
+    if !has_theme(ref target, theme.name) {
+        target.themes.push(theme)
+    }
+}
+
+fun merge_submodule(ref target: SpesModule, ref sub: SpesModule, imp: UseImport) {
+    if imp.is_wildcard || imp.symbols.len() == 0 {
+        for i in 0..sub.screens.len() {
+            merge_screen(ref target, sub.screens[i])
+        }
+        for i in 0..sub.components.len() {
+            merge_component(ref target, sub.components[i])
+        }
+        for i in 0..sub.dialogs.len() {
+            merge_dialog(ref target, sub.dialogs[i])
+        }
+        for i in 0..sub.themes.len() {
+            merge_theme(ref target, sub.themes[i])
+        }
+        return
+    }
+    for s in 0..imp.symbols.len() {
+        set sym = imp.symbols[s]
+        for i in 0..sub.screens.len() {
+            if sub.screens[i].name == sym {
+                merge_screen(ref target, sub.screens[i])
+            }
+        }
+        for i in 0..sub.components.len() {
+            if sub.components[i].name == sym {
+                merge_component(ref target, sub.components[i])
+            }
+        }
+        for i in 0..sub.dialogs.len() {
+            if sub.dialogs[i].name == sym {
+                merge_dialog(ref target, sub.dialogs[i])
+            }
+        }
+        for i in 0..sub.themes.len() {
+            if sub.themes[i].name == sym {
+                merge_theme(ref target, sub.themes[i])
+            }
+        }
+    }
+}
+
+public fun resolve_module_imports_with_registry(
+    ref target: SpesModule,
+    ref registry: SpesRegistry,
+    ref in_stack: string[],
+    ref tracked_files: string[]
+) {
+    if has_visited(ref in_stack, target.module_id) {
+        panic(siesta_error("cyclic dependency detected: " + target.module_id, 1, 1, 112, "semantic"))
+    }
+    in_stack.push(target.module_id)
+
+    for i in 0..target.imports.len() {
+        set imp = target.imports[i]
+        set sub_mod_opt = registry.get(imp.module_id)
+        if sub_mod_opt == null {
+            panic(siesta_error("imported module identifier not found: '" + imp.module_id + "'", 1, 1, 110, "semantic"))
+        }
+        set sub_mod = sub_mod_opt ?? init_spes_module("")
+        set file_path = registry.get_path(imp.module_id)
+        if file_path.len() > 0 && !has_visited(ref tracked_files, file_path) {
+            tracked_files.push(file_path)
+        }
+
+        resolve_module_imports_with_registry(ref sub_mod, ref registry, ref in_stack, ref tracked_files)
+        merge_submodule(ref target, ref sub_mod, imp)
+    }
+
+    in_stack.pop()
+}
+
+public fun resolve_module_imports(
+    ref target: SpesModule,
+    current_file_path: string,
+    working_dir: string,
+    ref in_stack: string[],
+    ref tracked_files: string[]
+) {
+    set target_dir = path_parent(current_file_path)
+    if target_dir.len() == 0 || !dir_exists(target_dir) {
+        if working_dir.len() > 0 && dir_exists(path_join(working_dir, "src")) {
+            rewrite target_dir = path_join(working_dir, "src")
+        } elif working_dir.len() > 0 && dir_exists(working_dir) {
+            rewrite target_dir = working_dir
+        } else {
+            rewrite target_dir = "."
+        }
+    }
+
+    set dirs: string[] = [target_dir]
+    set registry = build_registry_from_dirs(dirs)
+
+    if registry.has(target.module_id) {
+        set existing = registry.get_path(target.module_id)
+        set norm_existing = norm_path(existing)
+        set norm_curr = norm_path(current_file_path)
+        if norm_existing != norm_curr && current_file_path.len() > 0 {
+            panic(siesta_error("conflicting module identifier '" + target.module_id + "' defined in both '" + existing + "' and '" + current_file_path + "'", 1, 1, 114, "semantic"))
+        }
+    }
+    resolve_module_imports_with_registry(ref target, ref registry, ref in_stack, ref tracked_files)
+}

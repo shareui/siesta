@@ -1,0 +1,134 @@
+load core.panic: panic
+load .ast: WidgetNode
+load .errors: siesta_error
+
+fun is_int_literal(s: string) -> bool {
+    if s.len() == 0 {
+        return false
+    }
+    set start: int64 = 0
+    if s[0..1] == "-" {
+        rewrite start = 1
+    }
+    if start >= s.len() {
+        return false
+    }
+    for i in start..s.len() {
+        set ch = s[i..i + 1]
+        if ch < "0" || ch > "9" {
+            return false
+        }
+    }
+    return true
+}
+
+fun is_bool_literal(s: string) -> bool {
+    return s == "true" || s == "false"
+}
+
+fun is_color_literal(s: string) -> bool {
+    set str = s
+    if str.len() >= 2 && str[0..1] == "\"" && str[str.len() - 1..str.len()] == "\"" {
+        rewrite str = str[1..str.len() - 1]
+    }
+    if str.len() >= 4 && str[0..1] == "#" {
+        return true
+    }
+    if str == "default" || str == "black" || str == "white" || str == "red" || str == "green" || str == "blue" || str == "yellow" || str == "magenta" || str == "cyan" || str == "gray" {
+        return true
+    }
+    if str.len() >= 6 && str[0..6] == "theme." {
+        return true
+    }
+    if str.len() >= 4 && str[0..4] == "rgb(" {
+        return true
+    }
+    if str.len() >= 8 && str[0..8] == "ansi256(" {
+        return true
+    }
+    return false
+}
+
+fun is_align_literal(s: string) -> bool {
+    set str = s
+    if str.len() >= 2 && str[0..1] == "\"" && str[str.len() - 1..str.len()] == "\"" {
+        rewrite str = str[1..str.len() - 1]
+    }
+    return str == "start" || str == "center" || str == "end" || str == "stretch" || str == "left" || str == "right"
+}
+
+fun is_justify_literal(s: string) -> bool {
+    set str = s
+    if str.len() >= 2 && str[0..1] == "\"" && str[str.len() - 1..str.len()] == "\"" {
+        rewrite str = str[1..str.len() - 1]
+    }
+    return str == "start" || str == "center" || str == "end" || str == "space_between" || str == "space_around" || str == "space_evenly"
+}
+
+fun is_border_literal(s: string) -> bool {
+    set str = s
+    if str.len() >= 2 && str[0..1] == "\"" && str[str.len() - 1..str.len()] == "\"" {
+        rewrite str = str[1..str.len() - 1]
+    }
+    return str == "none" || str == "plain" || str == "single" || str == "double" || str == "rounded" || str == "thick" || str == "bold" || str == "heavy" || str == "ascii" || str == "top" || str == "bottom" || str == "left" || str == "right"
+}
+
+fun check_prop_type(widget_kind: string, key: string, val: string) {
+    if val.len() == 0 {
+        panic(siesta_error("property '" + key + "' in widget '" + widget_kind + "' expects a value", 1, 1, 120, "semantic"))
+    }
+    if val.len() >= 3 && val[0..3] == "if " { return }
+    if val.len() >= 5 && val[0..5] == "bind:" { return }
+    if val.len() >= 6 && val[0..6] == "theme." { return }
+    if val == "fill" { return }
+    if key == "padding" || key == "paddingX" || key == "paddingY" || key == "gap" || key == "gapX" || key == "gapY" || key == "weight" || key == "cols" || key == "rows" || key == "minWidth" || key == "minHeight" || key == "maxWidth" || key == "maxHeight" || key == "hideBelow" || key == "min_w" || key == "min_h" || key == "max_w" || key == "max_h" || key == "visibleRows" || key == "cursorRow" || key == "cursorCol" || key == "scrollTop" {
+        if val[0..1] == "\"" || is_bool_literal(val) {
+            panic(siesta_error("property '" + key + "' in widget '" + widget_kind + "' expects int32, got: " + val, 1, 1, 120, "semantic"))
+        }
+    }
+    if key == "breakpoint" {
+        set bp_val = val
+        if bp_val.len() >= 2 && bp_val[0..1] == "\"" && bp_val[bp_val.len() - 1..bp_val.len()] == "\"" {
+            rewrite bp_val = bp_val[1..bp_val.len() - 1]
+        }
+        if bp_val != "desktop" && bp_val != "compact" && bp_val != "compact+" && bp_val != "mobile" {
+            panic(siesta_error("property 'breakpoint' expects 'desktop', 'compact', 'compact+', or 'mobile', got: " + val, 1, 1, 126, "semantic"))
+        }
+    }
+    if key == "fill" || key == "bold" || key == "italic" || key == "dim" || key == "underline" || key == "reversed" || key == "modal" || key == "dimBackdrop" || key == "vertical" || key == "focused" || key == "checked" || key == "showLineNumbers" || key == "showPercentage" || key == "showHeader" {
+        if val[0..1] == "\"" || is_int_literal(val) {
+            panic(siesta_error("property '" + key + "' in widget '" + widget_kind + "' expects bool, got: " + val, 1, 1, 121, "semantic"))
+        }
+    }
+    if key == "color" || key == "fg" || key == "bg" || key == "borderColor" || key == "borderFg" || key == "borderBg" || key == "dirFg" || key == "activeFg" || key == "activeBg" {
+        if !is_color_literal(val) && (val[0..1] == "\"" || is_int_literal(val) || is_bool_literal(val)) {
+            panic(siesta_error("property '" + key + "' expects Color, got: " + val, 1, 1, 125, "semantic"))
+        }
+    }
+    if key == "align" || key == "titleAlign" {
+        if !is_align_literal(val) {
+            panic(siesta_error("property '" + key + "' in widget '" + widget_kind + "' expects Align variant, got: " + val, 1, 1, 122, "semantic"))
+        }
+    }
+    if key == "justify" {
+        if !is_justify_literal(val) {
+            panic(siesta_error("property 'justify' in widget '" + widget_kind + "' expects Justify variant, got: " + val, 1, 1, 123, "semantic"))
+        }
+    }
+    if key == "border" || key == "borderStyle" {
+        if !is_border_literal(val) {
+            panic(siesta_error("property '" + key + "' expects BorderStyle, got: " + val, 1, 1, 124, "semantic"))
+        }
+    }
+}
+
+public fun validate_widget_tree(ref node: WidgetNode) {
+    for i in 0..node.props.len() {
+        set prop = node.props[i]
+        check_prop_type(node.kind, prop.key, prop.val)
+    }
+    for i in 0..node.children.len() {
+        set child_node = node.children[i]
+        validate_widget_tree(ref child_node)
+    }
+}

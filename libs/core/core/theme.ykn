@@ -1,0 +1,38 @@
+#![lint::allow("unused_import")]
+
+load std.env: get_env
+load std.strings: split, trim
+
+fun parse_colorfgbg_dark(val: string) -> bool {
+    set parts = split(val, ";")
+    if parts.len() >= 2 {
+        set bg_str = trim(parts[1])
+        if bg_str == "0" || bg_str == "1" || bg_str == "2" || bg_str == "3" || bg_str == "4" || bg_str == "5" || bg_str == "6" || bg_str == "8" {
+            return true
+        }
+        if bg_str == "7" || bg_str == "15" || bg_str == "11" || bg_str == "12" || bg_str == "13" || bg_str == "14" {
+            return false
+        }
+    }
+    return true
+}
+
+public fun detect_is_dark_mode() -> bool {
+    set theme_env = get_env("TERM_THEME")
+    if theme_env != null {
+        set t = theme_env ?? ""
+        if t == "light" { return false }
+        if t == "dark" { return true }
+    }
+    set color_scheme = get_env("COLOR_SCHEME")
+    if color_scheme != null {
+        set cs = color_scheme ?? ""
+        if cs == "light" { return false }
+        if cs == "dark" { return true }
+    }
+    set fgbg = get_env("COLORFGBG")
+    if fgbg != null {
+        return parse_colorfgbg_dark(fgbg ?? "")
+    }
+    return true
+}

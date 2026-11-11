@@ -1,0 +1,81 @@
+#![lint::allow("unused_import")]
+
+load core.process: args
+load core.utils: cast
+load std.io: terminal_size
+load std.itermtool.event: poll_event, try_read_event, Event, EVENT_KEY, EVENT_MOUSE
+load std.itermtool.key: KeyEvent, KEY_ESC
+load std.itermtool.mouse: MouseEvent
+load siesta: SiestaApp, log_init, log_debug
+load .editor: DemoScreen, MODE_NORMAL
+
+fun main() {
+    log_init("log.txt")
+    log_debug("[main] initializing demo application")
+
+    set cli_args: string[] = args()
+    set target_path = "."
+    if cli_args.len() > 0 {
+        rewrite target_path = cli_args[0]
+    }
+    log_debug("[main] cli_args count = " + cast(cli_args.len(), "string") + ", target_path = " + target_path)
+
+    set sz = terminal_size()
+    set w: int32 = if sz.0 > 20 { sz.0 } else { cast(100, "int32") }
+    set h: int32 = if sz.1 > 10 { sz.1 } else { cast(30, "int32") }
+    log_debug("[main] detected terminal_size = (" + cast(sz.0, "string") + ", " + cast(sz.1, "string") + "), effective size = (" + cast(w, "string") + ", " + cast(h, "string") + ")")
+
+    set app = init SiestaApp(w, h)
+    log_debug("[main] SiestaApp instantiated")
+
+    set editor_screen = init DemoScreen(target_path)
+    log_debug("[main] DemoScreen instantiated")
+
+    app.init_terminal()
+    log_debug("[main] terminal initialized")
+
+    // initial render
+    app.double_buf.back_buffer.clear()
+    editor_screen.draw(ref app.double_buf.back_buffer)
+    set initial_flushed = app.double_buf.diff_and_flush()
+    log_debug("[main] initial render flushed = " + cast(initial_flushed, "string"))
+
+    while region app.is_running {
+        set has_event = poll_event(16)
+        if has_event {
+            set ev = try_read_event()
+            if ev != null {
+                set e = ev ?? init Event(0)
+                if e.kind == EVENT_KEY && e.key != null {
+                    set k = e.key ?? init KeyEvent(0, "")
+                    log_debug("[main] key: " + k.to_string() + " code=" + cast(k.code, "string") + " char='" + k.char_val + "' ctrl=" + (if k.ctrl { "true" } else { "false" }))
+                    // Ctrl+Q: quit
+                    if k.ctrl && (k.char_val == "q" || k.code == 113 || k.code == 17) {
+                        log_debug("[main] Ctrl+Q pressed, quitting")
+                        break
+                    }
+                    // ESC in normal mode: quit if no pending command or message (and not showing controls dialog)
+                    if !editor_screen.show_controls && editor_screen.mode == MODE_NORMAL && k.code == KEY_ESC && editor_screen.pending_cmd.len() == 0 && editor_screen.status_msg.len() == 0 {
+                        log_debug("[main] ESC in normal mode pressed, quitting")
+                        break
+                    }
+                    set _ = editor_screen.handle_key(k)
+                } elif e.kind == EVENT_MOUSE && e.mouse != null {
+                    set m = e.mouse ?? init MouseEvent(0, 0, 0, 0)
+                    set _ = editor_screen.handle_mouse(m)
+                }
+            }
+        }
+
+        // render frame
+        app.double_buf.back_buffer.clear()
+        editor_screen.draw(ref app.double_buf.back_buffer)
+        set flushed = app.double_buf.diff_and_flush()
+        if flushed > 0 {
+            log_debug("[main] frame updated, flushed = " + cast(flushed, "string"))
+        }
+    }
+
+    app.restore_terminal()
+    log_debug("[main] terminal restored, exiting cleanly")
+}

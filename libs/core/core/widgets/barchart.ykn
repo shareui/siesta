@@ -1,0 +1,87 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load ..buffer: TerminalBuffer
+load ..layout.rect: Rect
+
+public class BarChartWidget {
+    public values: int32[]
+    public labels: string[]
+    public max_val: int32
+    public bar_width: int32
+    public bar_gap: int32
+    public bar_fg: string
+    public bar_bg: string
+    public label_fg: string
+
+    public fun init(
+        values: int32[] = [],
+        labels: string[] = [],
+        max_val: int32 = 0,
+        bar_width: int32 = 3,
+        bar_gap: int32 = 1,
+        bar_fg: string = "cyan",
+        bar_bg: string = "default",
+        label_fg: string = "white"
+    ) {
+        rewrite this.values = values
+        rewrite this.labels = labels
+        rewrite this.max_val = max_val
+        rewrite this.bar_width = if bar_width > 0 { bar_width } else { cast(1, "int32") }
+        rewrite this.bar_gap = if bar_gap >= 0 { bar_gap } else { cast(0, "int32") }
+        rewrite this.bar_fg = bar_fg
+        rewrite this.bar_bg = bar_bg
+        rewrite this.label_fg = label_fg
+    }
+
+    public fun render(ref buf: TerminalBuffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 || this.values.len() == 0 {
+            return
+        }
+
+        set eff_max = this.max_val
+        if eff_max <= 0 {
+            for i in 0..this.values.len() {
+                if this.values[cast(i, "int64")] > eff_max {
+                    rewrite eff_max = this.values[cast(i, "int64")]
+                }
+            }
+        }
+
+        if eff_max <= 0 {
+            rewrite eff_max = 1
+        }
+
+        
+        set has_labels = this.labels.len() > 0
+        set chart_h: int32 = if has_labels && area.height > 1 { area.height - 1 } else { area.height }
+        set cur_x = area.x
+
+        for i in 0..this.values.len() {
+            if cur_x + this.bar_width > area.x + area.width {
+                break
+            }
+            set val = this.values[cast(i, "int64")]
+            if val < 0 { rewrite val = 0 }
+            set bar_h = (val * chart_h) / eff_max
+            if bar_h > chart_h { rewrite bar_h = chart_h }
+
+            // vertical bar column
+            for row in 0..bar_h {
+                set cy = area.y + chart_h - 1 - cast(row, "int32")
+                for w in 0..this.bar_width {
+                    buf.draw_text(cur_x + cast(w, "int32"), cy, "█", this.bar_fg, this.bar_bg, false, false, false, false, false)
+                }
+            }
+
+            // label at bottom if room
+            if has_labels && i < this.labels.len() && area.height > 1 {
+                set lbl = this.labels[cast(i, "int64")]
+                set eff_lbl: string = if lbl.len() > cast(this.bar_width, "int64") { lbl[0..cast(this.bar_width, "int64")] } else { lbl }
+                buf.draw_text(cur_x, area.y + area.height - 1, eff_lbl, this.label_fg, this.bar_bg, false, false, false, false, false)
+            }
+
+            rewrite cur_x = cur_x + this.bar_width + this.bar_gap
+        }
+    }
+}

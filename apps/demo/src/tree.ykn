@@ -1,0 +1,191 @@
+#![lint::allow("unused_import")]
+
+load core.mem: persistent
+load core.utils: cast
+load std.fs.dirs: list_dir, dir_exists
+load std.fs.paths: path_join, path_is_dir, path_parent, path_canonicalize
+load siesta: TerminalBuffer, log_debug
+
+public class FileEntry {
+    public name: string
+    public full_path: string
+    public is_dir: bool
+
+    public fun init(name: string, full_path: string, is_dir: bool) {
+        rewrite this.name = name
+        rewrite this.full_path = full_path
+        rewrite this.is_dir = is_dir
+    }
+}
+
+public class FileTree {
+    public current_dir: string
+    public entries: FileEntry[]
+    public selected_index: int32
+    public scroll_top: int32
+    public focused: bool
+
+    public fun init(root_path: string) {
+        log_debug("[FileTree.init] requested root_path = " + root_path)
+        set empty_entries: FileEntry[] = []
+        set effective_path: string = if dir_exists(root_path) { root_path } else { "." }
+        rewrite this.current_dir = persistent(path_canonicalize(effective_path))
+        log_debug("[FileTree.init] effective root_path = " + effective_path + ", canonical = " + this.current_dir)
+        rewrite this.entries = persistent(empty_entries)
+        rewrite this.selected_index = 0
+        rewrite this.scroll_top = 0
+        rewrite this.focused = false
+        this.load_dir(this.current_dir)
+    }
+
+    public fun load_dir(target_dir: string) -> FileTree {
+        log_debug("[FileTree.load_dir] scanning target_dir = " + target_dir)
+        if !dir_exists(target_dir) {
+            log_debug("[FileTree.load_dir] target_dir does not exist: " + target_dir)
+            return this
+        }
+        rewrite this.current_dir = persistent(path_canonicalize(target_dir))
+        set new_entries: FileEntry[] = []
+
+        // add parent directory navigation entry
+        set parent = path_parent(this.current_dir)
+        if parent.len() > 0 && parent != this.current_dir {
+            new_entries.push(init FileEntry("../", parent, true))
+        }
+
+        set raw_items = list_dir(this.current_dir)
+        log_debug("[FileTree.load_dir] list_dir found raw item count = " + cast(raw_items.len(), "string"))
+        // first pass: add directories with trailing slash
+        for i in 0..raw_items.len() {
+            set item_name = raw_items[i]
+            set full = path_join(this.current_dir, item_name)
+            if path_is_dir(full) {
+                new_entries.push(init FileEntry(item_name + "/", full, true))
+            }
+        }
+        // second pass: add regular files with extensions
+        for i in 0..raw_items.len() {
+            set item_name = raw_items[i]
+            set full = path_join(this.current_dir, item_name)
+            if !path_is_dir(full) {
+                new_entries.push(init FileEntry(item_name, full, false))
+            }
+        }
+        rewrite this.entries = persistent(new_entries)
+        rewrite this.selected_index = 0
+        rewrite this.scroll_top = 0
+        log_debug("[FileTree.load_dir] entries populated, total = " + cast(this.entries.len(), "string"))
+        return this
+    }
+
+    public fun select_prev() {
+        if this.selected_index > 0 {
+            rewrite this.selected_index = this.selected_index - 1
+            if this.selected_index < this.scroll_top {
+                rewrite this.scroll_top = this.selected_index
+            }
+        }
+    }
+
+    public fun select_next(view_h: int32) {
+        set total = cast(this.entries.len(), "int32")
+        if this.selected_index < total - 1 {
+            rewrite this.selected_index = this.selected_index + 1
+            if this.selected_index >= this.scroll_top + view_h {
+                rewrite this.scroll_top = this.selected_index - view_h + 1
+            }
+        }
+    }
+
+    public fun scroll_up() {
+        if this.scroll_top > 0 {
+            rewrite this.scroll_top = this.scroll_top - 1
+        }
+    }
+
+    public fun scroll_down(view_h: int32) {
+        set total = cast(this.entries.len(), "int32")
+        if this.scroll_top + view_h < total {
+            rewrite this.scroll_top = this.scroll_top + 1
+        }
+    }
+
+    public fun get_selected() -> FileEntry? {
+        set sel = cast(this.selected_index, "int64")
+        if sel >= 0 && sel < this.entries.len() {
+            return this.entries[sel]
+        }
+        return null
+    }
+
+    public fun handle_click(click_y: int32, view_y: int32, view_h: int32) -> FileEntry? {
+        set rel_row = click_y - (view_y + 2)
+        if rel_row < 0 || rel_row >= view_h {
+            return null
+        }
+        set target_idx = this.scroll_top + rel_row
+        set total = cast(this.entries.len(), "int32")
+        if target_idx >= 0 && target_idx < total {
+            rewrite this.selected_index = target_idx
+            return this.entries[cast(target_idx, "int64")]
+        }
+        return null
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, w: int32, h: int32, bg: string = "default", fg: string = "white", dir_fg: string = "blue", active_bg: string = "cyan", active_fg: string = "black", border_fg: string = "dim") {
+        if w <= 0 || h <= 2 {
+            return
+        }
+        // header with current directory path
+        set header_title = " [DIR] " + this.current_dir
+        if cast(header_title.len(), "int32") > w {
+            set sfx_len = cast(w - 3, "int64")
+            if sfx_len > 0 {
+                rewrite header_title = "..." + this.current_dir[this.current_dir.len() - sfx_len..this.current_dir.len()]
+            }
+        }
+        buf.draw_text(x, y, header_title, dir_fg, bg, true, false, false, false, false)
+        set title_len = cast(header_title.len(), "int32")
+        if title_len < w {
+            for hc in title_len..w {
+                buf.draw_text(x + cast(hc, "int32"), y, " ", fg, bg, false, false, false, false, false)
+            }
+        }
+
+        // horizontal separator line
+        for c in 0..w {
+            buf.draw_text(x + cast(c, "int32"), y + 1, "─", border_fg, bg, false, false, false, false, false)
+        }
+
+        // list entries
+        set list_h = h - 2
+        set total = cast(this.entries.len(), "int32")
+        for row in 0..list_h {
+            set idx = this.scroll_top + cast(row, "int32")
+            set cur_y = y + 2 + cast(row, "int32")
+            if idx >= total {
+                // blank out remaining area
+                for c in 0..w {
+                    buf.draw_text(x + cast(c, "int32"), cur_y, " ", fg, bg, false, false, false, false, false)
+                }
+            } else {
+                set entry = this.entries[cast(idx, "int64")]
+                set is_sel = (idx == this.selected_index)
+                set pfx: string = if is_sel { "> " } else { "  " }
+                set label = pfx + entry.name
+                if cast(label.len(), "int32") > w {
+                    rewrite label = label[0..cast(w, "int64")]
+                } else {
+                    // pad label to full width for selection highlight
+                    while cast(label.len(), "int32") < w {
+                        rewrite label = label + " "
+                    }
+                }
+                set item_fg: string = if is_sel { active_fg } elif entry.is_dir { dir_fg } else { fg }
+                set item_bg: string = if is_sel { (if this.focused { active_bg } else { border_fg }) } else { bg }
+                set bold = entry.is_dir || is_sel
+                buf.draw_text(x, cur_y, label, item_fg, item_bg, bold, false, false, false, false)
+            }
+        }
+    }
+}

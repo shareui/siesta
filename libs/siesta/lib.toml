@@ -1,0 +1,27 @@
+[lib]
+name = "siesta"
+version = "0.1.0"
+entry = "siesta/lib.ykn"
+yukino = ["0.1.0", "+"] # [min, max]
+output = "static"
+includes = ["core", "stdlib"]
+
+[test]
+threads = "auto"
+timeout_ms = 10000
+capture_output = true
+fail_fast = false
+tests_dir = "tests"
+
+[features]
+default = []
+
+[libs.runtime]
+siesta_core = { path = "../core", reexport = true, splitnames = true }
+res = { path = "../siestaloader", reexport = true, splitnames = true }
+
+[libs.build]
+
+[libs.static]
+archives = []
+system = []

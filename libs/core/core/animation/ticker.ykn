@@ -1,0 +1,81 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+public class AnimationTicker {
+    public active_count: int32
+    public frame_interval_ms: int64
+    public last_tick_ms: int64
+    public is_running: bool
+
+    public fun init(target_fps: int32 = 60) {
+        set interval: int64 = 16
+        if target_fps > 0 {
+            rewrite interval = 1000 / cast(target_fps, "int64")
+        }
+        rewrite this.active_count = 0
+        rewrite this.frame_interval_ms = interval
+        rewrite this.last_tick_ms = 0
+        rewrite this.is_running = false
+    }
+
+    public fun is_idle() -> bool {
+        return this.active_count <= 0 || !this.is_running
+    }
+
+    public fun notify_active() {
+        rewrite this.active_count = this.active_count + 1
+        rewrite this.is_running = true
+    }
+
+    public fun notify_inactive() {
+        if this.active_count > 0 {
+            rewrite this.active_count = this.active_count - 1
+        }
+        if this.active_count <= 0 {
+            rewrite this.active_count = 0
+            rewrite this.is_running = false
+        }
+    }
+
+    public fun reset() {
+        rewrite this.active_count = 0
+        rewrite this.is_running = false
+        rewrite this.last_tick_ms = 0
+    }
+
+    public fun set_fps(target_fps: int32) {
+        if target_fps > 0 {
+            rewrite this.frame_interval_ms = 1000 / cast(target_fps, "int64")
+        }
+    }
+
+    public fun should_render(now_ms: int64) -> bool {
+        if this.is_idle() {
+            return false
+        }
+        if this.last_tick_ms == 0 {
+            rewrite this.last_tick_ms = now_ms
+            return true
+        }
+        set elapsed = now_ms - this.last_tick_ms
+        if elapsed >= this.frame_interval_ms {
+            rewrite this.last_tick_ms = now_ms
+            return true
+        }
+        return false
+    }
+
+    public fun get_sleep_time_ms(now_ms: int64) -> int64 {
+        if this.is_idle() {
+            return -1
+        }
+        if this.last_tick_ms == 0 {
+            return 0
+        }
+        set elapsed = now_ms - this.last_tick_ms
+        if elapsed >= this.frame_interval_ms {
+            return 0
+        }
+        return this.frame_interval_ms - elapsed
+    }
+}

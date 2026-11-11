@@ -1,0 +1,85 @@
+load core.utils: cast
+load std.math: floor, round
+
+public fun scale_size(base: int32, factor: float64) -> int32 {
+    if factor == 1.0 { return base }
+    
+    set scaled = floor(cast(base, "float64") * factor)
+    return cast(scaled, "int32")
+}
+
+public fun scale_padding(base: int32, factor: float64) -> int32 {
+    if factor == 1.0 { return base }
+
+    set scaled = round(cast(base, "float64") * factor)
+    return cast(scaled, "int32")
+}
+
+public fun scale_gap(base: int32, factor: float64) -> int32 {
+    if factor == 1.0 { return base }
+    
+    set scaled = round(cast(base, "float64") * factor)
+    return cast(scaled, "int32")
+}
+
+public struct Breakpoint {
+    name: string
+    min_cols: int32
+    max_cols: int32
+}
+
+public fun init_breakpoint(name: string, min_cols: int32, max_cols: int32) -> Breakpoint {
+    return Breakpoint {
+        name: name,
+        min_cols: min_cols,
+        max_cols: max_cols
+    }
+}
+
+public fun matches_breakpoint(ref bp: Breakpoint, cols: int32) -> bool {
+    return cols >= bp.min_cols && (bp.max_cols <= 0 || cols <= bp.max_cols)
+}
+
+public fun resolve_active_breakpoint(cols: int32) -> string {
+    if cols < 80 { return "mobile" }
+    if cols < 120 { return "compact" }
+    return "desktop"
+}
+
+public fun matches_breakpoint_name(cols: int32, name: string) -> bool {
+    if name == "mobile" {
+        return cols < 80
+    }
+    if name == "compact" {
+        return cols >= 80 && cols < 120
+    }
+    if name == "desktop" {
+        return cols >= 120
+    }
+    if name == "compact+" {
+        return cols >= 80
+    }
+    return false
+}
+
+public fun compute_scale_factor(cols: int32, rows: int32, base_w: int32, base_h: int32) -> float64 {
+    if base_w <= 0 || base_h <= 0 { return 1.0 }
+
+    set scale_w = cast(cols, "float64") / cast(base_w, "float64")
+    set scale_h = cast(rows, "float64") / cast(base_h, "float64")
+    
+    set factor: float64 = if scale_w < scale_h { scale_w } else { scale_h }
+
+    if factor < 0.5 { return 0.5 }
+    if factor > 3.0 { return 3.0 }
+    
+    return factor
+}
+
+public fun should_render_responsive(cols: int32, rows: int32, min_w: int32, min_h: int32, max_w: int32, max_h: int32) -> bool {
+    if min_w > 0 && cols < min_w { return false }
+    if min_h > 0 && rows < min_h { return false }
+    if max_w > 0 && cols > max_w { return false }
+    if max_h > 0 && rows > max_h { return false }
+    return true
+}

@@ -1,0 +1,136 @@
+#![lint::allow("unused_import")]
+
+load core.utils: assert
+load root.buffer: TerminalBuffer
+load root.layout.rect: Rect, init_rect, rects_equal, rect_inner, rect_intersect
+load root.layout.scale: scale_size, scale_padding, scale_gap, Breakpoint, init_breakpoint, matches_breakpoint, resolve_active_breakpoint
+load root.layout.engine: LayoutNode, init_layout_node, layout_row, layout_col, layout_stack, layout_grid
+load root.layout.engine: Constraint, constraint_length, constraint_percentage, constraint_ratio, constraint_fill, solve_constraints, layout_split_horizontal, layout_split_vertical
+load root.layout.font: render_matrix_text_2x, render_matrix_text_3x, draw_matrix_text
+
+#[test]
+fun test_scaling_helpers() {
+    assert(scale_size(80, 1.5) == 120)
+    assert(scale_size(80, 0.5) == 40)
+    assert(scale_size(80, 1.0) == 80)
+    assert(scale_padding(3, 1.5) == 5)
+    assert(scale_gap(2, 1.5) == 3)
+}
+
+#[test]
+fun test_layout_row_weights_quantization() {
+    set bounds = init_rect(0, 0, 100, 20)
+    set items: LayoutNode[] = []
+    items.push(init_layout_node(0, 0, 1))
+    items.push(init_layout_node(0, 0, 3))
+
+    set rects = layout_row(bounds, 0, 0, 4, "start", "stretch", items)
+    assert(rects.len() == 2)
+
+    // available width = 100 - 4 = 96
+    // item 0: 96 * 1 / 4 = 24
+    // item 1: 96 * 3 / 4 = 72
+    assert(rects[0].x == 0)
+    assert(rects[0].width == 24)
+    assert(rects[0].height == 20)
+
+    assert(rects[1].x == 28)
+    assert(rects[1].width == 72)
+    assert(rects[1].height == 20)
+}
+
+#[test]
+fun test_layout_col_alignment() {
+    set bounds = init_rect(0, 0, 40, 60)
+    set items: LayoutNode[] = []
+    items.push(init_layout_node(20, 10, 0, "center"))
+    items.push(init_layout_node(10, 10, 0, "end"))
+
+    set rects = layout_col(bounds, 0, 0, 0, "start", "start", items)
+    assert(rects.len() == 2)
+
+    // item 0: center in 40 w -> (40 - 20) / 2 = 10
+    assert(rects[0].x == 10)
+    assert(rects[0].y == 0)
+    assert(rects[0].width == 20)
+    assert(rects[0].height == 10)
+
+    // item 1: end in 40 w -> 40 - 10 = 30
+    assert(rects[1].x == 30)
+    assert(rects[1].y == 10)
+    assert(rects[1].width == 10)
+    assert(rects[1].height == 10)
+}
+
+#[test]
+fun test_layout_grid() {
+    set bounds = init_rect(0, 0, 80, 40)
+    set rects = layout_grid(bounds, 2, 2, 0, 0)
+    assert(rects.len() == 4)
+
+    assert(rects[0].x == 0 && rects[0].y == 0 && rects[0].width == 40 && rects[0].height == 20)
+    assert(rects[1].x == 40 && rects[1].y == 0 && rects[1].width == 40 && rects[1].height == 20)
+    assert(rects[2].x == 0 && rects[2].y == 20 && rects[2].width == 40 && rects[2].height == 20)
+    assert(rects[3].x == 40 && rects[3].y == 20 && rects[3].width == 40 && rects[3].height == 20)
+}
+
+#[test]
+fun test_matrix_font_rendering() {
+    set lines2 = render_matrix_text_2x("OK")
+    assert(lines2.len() == 2)
+    assert(lines2[0].len() > 0)
+    assert(lines2[1].len() > 0)
+
+    set buf = init TerminalBuffer(20, 5)
+    draw_matrix_text(ref buf, 2, 1, "A", 2)
+    assert(buf.get_cell(2, 1).ch.len() > 0)
+    assert(buf.get_cell(2, 1).ch != " ")
+}
+
+#[test]
+fun test_breakpoints() {
+    set bp = init_breakpoint("tablet", 80, 120)
+    assert(matches_breakpoint(ref bp, 100))
+    assert(!matches_breakpoint(ref bp, 70))
+    assert(!matches_breakpoint(ref bp, 130))
+
+    assert(resolve_active_breakpoint(60) == "mobile")
+    assert(resolve_active_breakpoint(100) == "compact")
+    assert(resolve_active_breakpoint(140) == "desktop")
+}
+
+#[test]
+fun test_rect_inner_and_intersect() {
+    set r = init_rect(10, 10, 100, 50)
+    set inner = rect_inner(ref r, 2, 2, 4, 4)
+    assert(inner.x == 14)
+    assert(inner.y == 12)
+    assert(inner.width == 92)
+    assert(inner.height == 46)
+
+    set a = init_rect(0, 0, 20, 20)
+    set b = init_rect(10, 10, 20, 20)
+    set inter = rect_intersect(ref a, ref b)
+    assert(inter.x == 10 && inter.y == 10 && inter.width == 10 && inter.height == 10)
+}
+
+#[test]
+fun test_layout_constraints_and_splits() {
+    set c: Constraint[] = []
+    c.push(constraint_length(20))
+    c.push(constraint_percentage(50))
+    c.push(constraint_fill(1))
+
+    set sizes = solve_constraints(100, ref c)
+    assert(sizes.len() == 3)
+    assert(sizes[0] == 20)
+    assert(sizes[1] == 50)
+    assert(sizes[2] == 30)
+
+    set bounds = init_rect(0, 0, 80, 24)
+    set splits = layout_split_horizontal(bounds, ref c, 0)
+    assert(splits.len() == 3)
+    assert(splits[0].width == 20)
+    assert(splits[1].width == 40)
+    assert(splits[2].width == 20)
+}

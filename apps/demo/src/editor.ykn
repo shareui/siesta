@@ -1,0 +1,378 @@
+#![lint::allow("unused_import")]
+
+load core.mem: persistent
+load core.utils: cast
+load std.fs.files: file_read_text, file_write_text, file_exists
+load std.itermtool.key: KeyEvent, KEY_CHAR, KEY_ENTER, KEY_BACKSPACE, KEY_ESC, KEY_TAB, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_HOME, KEY_END, KEY_DELETE, KEY_SPACE, KEY_F1
+load std.itermtool.mouse: MouseEvent
+load siesta: Cell, init_cell, TerminalBuffer, Screen, Dialog, TextAreaWidget, log_debug
+load .tree: FileTree, FileEntry
+
+#[siesta::res("views.spes", "locales.toml")]
+class GeneratedViews {}
+
+public static MODE_NORMAL: int32 = 0
+public static MODE_INSERT: int32 = 1
+
+public class DemoScreen extends Screen {
+    public tree: FileTree
+    public editor: TextAreaWidget
+    public theme: EditorTheme
+    public bundle: UiBundle
+    public mode: int32
+    public tree_width: int32
+    public is_resizing_tree: bool
+    public focus_editor: bool
+    public current_file_path: string
+    public is_modified: bool
+    public status_msg: string
+    public pending_cmd: string
+    public show_controls: bool
+    public controls_dialog: ControlsDialog
+
+    public fun init(start_path: string) {
+        super("DemoScreen")
+        log_debug("[DemoScreen.init] start_path = " + start_path)
+        rewrite this.tree = init FileTree(start_path)
+        rewrite this.editor = init TextAreaWidget("main_editor", "", true)
+        rewrite this.theme = init EditorTheme()
+        rewrite this.bundle = init UiBundle()
+        rewrite this.mode = MODE_NORMAL
+        rewrite this.tree_width = 26
+        rewrite this.is_resizing_tree = false
+        rewrite this.focus_editor = false
+        rewrite this.current_file_path = ""
+        rewrite this.is_modified = false
+        rewrite this.status_msg = "Ready | Tab: focus | i: insert | ^S: save | ^\\: controls | ^Q: quit"
+        rewrite this.pending_cmd = ""
+        rewrite this.show_controls = false
+        rewrite this.controls_dialog = init ControlsDialog()
+
+        rewrite this.tree.focused = true
+        rewrite this.editor.focused = false
+
+        log_debug("[DemoScreen.init] tree initialized, entries count = " + cast(this.tree.entries.len(), "string"))
+
+        // auto-open first file if present
+        for i in 0..this.tree.entries.len() {
+            set entry = this.tree.entries[i]
+            if !entry.is_dir {
+                log_debug("[DemoScreen.init] auto-opening first file: " + entry.full_path)
+                set _ = this.open_file(entry.full_path)
+                break
+            }
+        }
+    }
+
+    public fun open_file(path: string) -> DemoScreen {
+        log_debug("[DemoScreen.open_file] requesting open: " + path)
+        if !file_exists(path) {
+            log_debug("[DemoScreen.open_file] file does not exist: " + path)
+            rewrite this.status_msg = persistent("File not found: " + path)
+            return this
+        }
+        set content = file_read_text(path)
+        log_debug("[DemoScreen.open_file] read " + cast(content.len(), "string") + " bytes from: " + path)
+        rewrite this.current_file_path = persistent(path)
+        rewrite this.is_modified = false
+        this.editor.load_text(content)
+        rewrite this.status_msg = persistent("Opened: " + path)
+        return this
+    }
+
+    public fun save_current_file() -> bool {
+        if this.current_file_path.len() == 0 {
+            rewrite this.status_msg = "No file currently open"
+            return false
+        }
+        set content = this.editor.get_text()
+        set ok = file_write_text(this.current_file_path, content)
+        if ok {
+            rewrite this.is_modified = false
+            rewrite this.status_msg = persistent(this.bundle.tr("editor.saved", "ru"))
+            return true
+        }
+        rewrite this.status_msg = persistent("Failed to write file: " + this.current_file_path)
+        return false
+    }
+
+    public fun handle_key(key: KeyEvent) -> bool {
+        // if controls dialog is open, 'q' or Esc closes it
+        if this.show_controls {
+            if this.controls_dialog.handle_key(key) {
+                rewrite this.show_controls = false
+                return true
+            }
+            return true
+        }
+
+        // Ctrl+\: toggle controls dialog (primary: Ctrl+\ or code 28; fallback: Ctrl+7, code 31, F1)
+        set is_ctrl_bs = (key.ctrl && key.char_val == "\\") || key.code == 28
+        set is_ctrl_7 = (key.ctrl && (key.char_val == "7" || key.code == 55)) || key.code == 31
+        set is_f1 = key.code == KEY_F1
+        if is_ctrl_bs || is_ctrl_7 || is_f1 {
+            rewrite this.show_controls = true
+            return true
+        }
+
+        // Ctrl+S: save file
+        if key.ctrl && (key.char_val == "s" || key.code == 115 || key.code == 19) {
+            set _ = this.save_current_file()
+            return true
+        }
+
+        // Tab: toggle focus between file tree and editor
+        if key.code == KEY_TAB {
+            rewrite this.focus_editor = !this.focus_editor
+            rewrite this.editor.focused = this.focus_editor
+            rewrite this.tree.focused = !this.focus_editor
+            return true
+        }
+
+        if this.mode == MODE_NORMAL {
+            return this.handle_normal_key(key)
+        }
+        return this.handle_insert_key(key)
+    }
+
+    fun handle_normal_key(key: KeyEvent) -> bool {
+        if key.code == KEY_ESC {
+            rewrite this.pending_cmd = ""
+            rewrite this.status_msg = ""
+            return true
+        }
+
+        if !this.focus_editor {
+            // file tree navigation
+            if key.code == KEY_UP || (key.code == KEY_CHAR && key.char_val == "k") {
+                this.tree.select_prev()
+                return true
+            }
+            if key.code == KEY_DOWN || (key.code == KEY_CHAR && key.char_val == "j") {
+                this.tree.select_next(20)
+                return true
+            }
+            if key.code == KEY_ENTER || (key.code == KEY_CHAR && key.char_val == "l") {
+                set sel = this.tree.get_selected()
+                if sel != null {
+                    set entry = sel ?? init FileEntry("", "", false)
+                    if entry.is_dir {
+                        this.tree.load_dir(entry.full_path)
+                    } else {
+                        set _ = this.open_file(entry.full_path)
+                        rewrite this.focus_editor = true
+                        rewrite this.editor.focused = true
+                        rewrite this.tree.focused = false
+                    }
+                }
+                return true
+            }
+            if key.code == KEY_CHAR && key.char_val == "i" {
+                rewrite this.focus_editor = true
+                rewrite this.editor.focused = true
+                rewrite this.tree.focused = false
+                rewrite this.mode = MODE_INSERT
+                return true
+            }
+            return false
+        }
+
+        // editor navigation in normal mode
+        if key.code == KEY_CHAR {
+            if key.char_val == "i" {
+                rewrite this.mode = MODE_INSERT
+                return true
+            }
+            if key.char_val == "o" {
+                this.editor.insert_line_below()
+                rewrite this.is_modified = true
+                rewrite this.mode = MODE_INSERT
+                return true
+            }
+            if key.char_val == "x" {
+                this.editor.delete_char_at_cursor()
+                rewrite this.is_modified = true
+                return true
+            }
+            if key.char_val == "d" {
+                if this.pending_cmd == "d" {
+                    this.editor.delete_current_line()
+                    rewrite this.is_modified = true
+                    rewrite this.pending_cmd = ""
+                } else {
+                    rewrite this.pending_cmd = "d"
+                }
+                return true
+            }
+            rewrite this.pending_cmd = ""
+            if key.char_val == "h" { this.editor.move_left(); return true }
+            if key.char_val == "j" { this.editor.move_down(20); return true }
+            if key.char_val == "k" { this.editor.move_up(); return true }
+            if key.char_val == "l" { this.editor.move_right(); return true }
+            if key.char_val == "0" { this.editor.move_home(); return true }
+            if key.char_val == "$" { this.editor.move_end(); return true }
+        }
+
+        if key.code == KEY_LEFT { this.editor.move_left(); return true }
+        if key.code == KEY_RIGHT { this.editor.move_right(); return true }
+        if key.code == KEY_UP { this.editor.move_up(); return true }
+        if key.code == KEY_DOWN { this.editor.move_down(20); return true }
+        return false
+    }
+
+    fun handle_insert_key(key: KeyEvent) -> bool {
+        if key.code == KEY_ESC {
+            rewrite this.mode = MODE_NORMAL
+            rewrite this.status_msg = ""
+            return true
+        }
+        set handled = this.editor.handle_key(key.code, key.char_val, 20)
+        if handled {
+            rewrite this.is_modified = true
+        }
+        return handled
+    }
+
+    public fun handle_mouse(m: MouseEvent) -> bool {
+        // resize separator drag handling
+        if m.is_down() {
+            if m.x >= this.tree_width - 1 && m.x <= this.tree_width + 1 {
+                rewrite this.is_resizing_tree = true
+                return true
+            }
+        }
+        if m.is_drag() && this.is_resizing_tree {
+            set new_w = m.x
+            if new_w >= 10 && new_w <= 60 {
+                rewrite this.tree_width = new_w
+            }
+            return true
+        }
+        if m.is_up() {
+            if this.is_resizing_tree {
+                rewrite this.is_resizing_tree = false
+                return true
+            }
+        }
+
+        // mouse click inside tree or editor
+        if m.is_down() {
+            if m.x < this.tree_width {
+                rewrite this.focus_editor = false
+                rewrite this.editor.focused = false
+                rewrite this.tree.focused = true
+                set clicked = this.tree.handle_click(m.y, 1, 30)
+                if clicked != null {
+                    set entry = clicked ?? init FileEntry("", "", false)
+                    if entry.is_dir {
+                        this.tree.load_dir(entry.full_path)
+                    } else {
+                        set _ = this.open_file(entry.full_path)
+                        rewrite this.focus_editor = true
+                        rewrite this.editor.focused = true
+                        rewrite this.tree.focused = false
+                    }
+                }
+                return true
+            }
+            // editor area click
+            rewrite this.focus_editor = true
+            rewrite this.editor.focused = true
+            rewrite this.tree.focused = false
+            this.editor.set_cursor_from_click(m.x, m.y, this.tree_width + 1, 1, 30)
+            return true
+        }
+
+        // mouse wheel scrolling
+        if m.is_scroll_up() {
+            if m.x < this.tree_width {
+                this.tree.scroll_up()
+            } else {
+                this.editor.move_up()
+            }
+            return true
+        }
+        if m.is_scroll_down() {
+            if m.x < this.tree_width {
+                this.tree.scroll_down(20)
+            } else {
+                this.editor.move_down(20)
+            }
+            return true
+        }
+        return false
+    }
+
+    public fun draw(ref buf: TerminalBuffer) {
+        set w = buf.width
+        set h = buf.height
+        log_debug("[DemoScreen.draw] entering draw: buffer size = (" + cast(w, "string") + ", " + cast(h, "string") + ")")
+        if w <= 10 || h <= 4 {
+            log_debug("[DemoScreen.draw] buffer too small (" + cast(w, "string") + "x" + cast(h, "string") + "), skipping frame")
+            return
+        }
+
+        // clamp tree width within valid screen boundaries
+        if this.tree_width > w - 15 {
+            rewrite this.tree_width = w - 15
+        }
+        if this.tree_width < 10 {
+            rewrite this.tree_width = 10
+        }
+
+        // fill full screen background with theme base background
+        buf.fill(init_cell(" ", this.theme.fg, this.theme.bg, false, false, false, false, false))
+
+        // row 0: top header bar
+        for c in 0..w {
+            buf.draw_text(cast(c, "int32"), 0, " ", this.theme.headerFg, this.theme.headerBg, false, false, false, false, false)
+        }
+        set title_text = " SIESTA DEMO "
+        buf.draw_text(0, 0, title_text, this.theme.headerTitleFg, this.theme.headerTitleBg, true, false, false, false, false)
+        set cur_info = " File: " + (if this.current_file_path.len() > 0 { this.current_file_path } else { "[No File]" })
+        set right_info = "[Ctrl+\\: Controls] [Drag '│': Resize] "
+        buf.draw_text(cast(title_text.len(), "int32"), 0, cur_info, this.theme.headerFg, this.theme.headerBg, false, false, false, false, false)
+        if w > cast(right_info.len(), "int32") + 40 {
+            buf.draw_text(w - cast(right_info.len(), "int32"), 0, right_info, this.theme.accent, this.theme.headerBg, false, false, false, false, false)
+        }
+
+        // rows 1..h - 2: tree on left, separator in middle, editor on right
+        set content_h = h - 2
+        this.tree.render(ref buf, 0, 1, this.tree_width, content_h, this.theme.sidebarBg, this.theme.sidebarFg, this.theme.sidebarDirFg, this.theme.sidebarActiveBg, this.theme.sidebarActiveFg, this.theme.separatorColor)
+
+        // vertical separator
+        set sep_fg: string = if this.is_resizing_tree { this.theme.separatorActiveColor } else { this.theme.separatorColor }
+        for row in 0..content_h {
+            set cur_y = 1 + cast(row, "int32")
+            buf.draw_text(this.tree_width, cur_y, "│", sep_fg, this.theme.sidebarBg, this.is_resizing_tree, false, false, false, false)
+        }
+
+        // editor text area
+        set editor_x = this.tree_width + 1
+        set editor_w = w - editor_x
+        this.editor.render(ref buf, editor_x, 1, editor_w, content_h, this.theme.fg, this.theme.bg, this.theme.lineNumFg, this.theme.cursorFg, this.theme.cursorBg)
+
+        // row h - 1: status bar
+        for sc in 0..w {
+            buf.draw_text(cast(sc, "int32"), h - 1, " ", this.theme.statusFg, this.theme.statusBg, false, false, false, false, false)
+        }
+        set mode_str: string = if this.mode == MODE_INSERT { " [INSERT] " } else { " [NORMAL] " }
+        set mode_fg: string = if this.mode == MODE_INSERT { this.theme.insertModeFg } else { this.theme.normalModeFg }
+        set mode_bg: string = if this.mode == MODE_INSERT { this.theme.insertModeBg } else { this.theme.normalModeBg }
+        buf.draw_text(0, h - 1, mode_str, mode_fg, mode_bg, true, false, false, false, false)
+
+        set mod_indicator: string = if this.is_modified { " [+] " } else { " " }
+        set status_start = cast(mode_str.len(), "int32")
+        buf.draw_text(status_start, h - 1, mod_indicator + this.status_msg, this.theme.statusFg, this.theme.statusBg, false, false, false, false, false)
+
+        set pos_str = "Ln ${this.editor.cursor_row + 1}, Col ${this.editor.cursor_col + 1} | ${this.editor.get_line_count()} lines "
+        if w > cast(pos_str.len(), "int32") + 20 {
+            buf.draw_text(w - cast(pos_str.len(), "int32"), h - 1, pos_str, this.theme.accent, this.theme.statusBg, true, false, false, false, false)
+        }
+
+        // modal controls dialog overlay via declarative .spes dialog
+        if this.show_controls {
+            this.controls_dialog.draw(ref buf)
+        }
+    }
+}

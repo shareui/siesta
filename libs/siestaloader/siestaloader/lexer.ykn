@@ -1,0 +1,247 @@
+load core.panic: panic
+load .tokens: Token, init_token
+load .errors: siesta_error
+
+public class SpesLexer {
+    src: string
+    pos: int64
+    len: int64
+    line: int64
+    col: int64
+
+    public fun init(src: string) {
+        rewrite this.src = src
+        rewrite this.pos = 0
+        rewrite this.len = src.len()
+        rewrite this.line = 1
+        rewrite this.col = 1
+    }
+
+    fun peek_char() -> string {
+        if this.pos >= this.len {
+            return ""
+        }
+        return this.src[this.pos..this.pos + 1]
+    }
+
+    fun peek_next_char() -> string {
+        if this.pos + 1 >= this.len {
+            return ""
+        }
+        return this.src[this.pos + 1..this.pos + 2]
+    }
+
+    fun next_char() -> string {
+        if this.pos >= this.len {
+            return ""
+        }
+        set ch: string = this.src[this.pos..this.pos + 1]
+        rewrite this.pos = this.pos + 1
+        if ch == "\n" {
+            rewrite this.line = this.line + 1
+            rewrite this.col = 1
+        } else {
+            rewrite this.col = this.col + 1
+        }
+        return ch
+    }
+
+    fun skip_whitespace_and_comments() {
+        while this.pos < this.len {
+            set ch: string = this.peek_char()
+            if ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
+                set _: string = this.next_char()
+            } elif ch == "/" && this.peek_next_char() == "/" {
+                while this.pos < this.len && this.peek_char() != "\n" {
+                    set _: string = this.next_char()
+                }
+            } else {
+                return
+            }
+        }
+    }
+
+    fun is_letter(ch: string) -> bool {
+        return (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch == "_"
+    }
+
+    fun is_digit(ch: string) -> bool {
+        return ch >= "0" && ch <= "9"
+    }
+
+    fun is_hex_digit(ch: string) -> bool {
+        return this.is_digit(ch) || (ch >= "a" && ch <= "f") || (ch >= "A" && ch <= "F")
+    }
+
+    fun read_string(is_tr: bool) -> Token {
+        set start_line: int64 = this.line
+        set start_col: int64 = this.col
+        set _: string = this.next_char()
+        set content_start: int64 = this.pos
+        set has_escape: bool = false
+        while this.pos < this.len && this.peek_char() != "\"" {
+            if this.peek_char() == "\\" {
+                rewrite has_escape = true
+                set _: string = this.next_char()
+                if this.pos < this.len {
+                    set _: string = this.next_char()
+                }
+            } else {
+                set _: string = this.next_char()
+            }
+        }
+        if this.pos >= this.len {
+            panic(siesta_error("unterminated string literal", start_line, start_col, 101))
+        }
+        set content_end: int64 = this.pos
+        set _: string = this.next_char()
+        set val: string = ""
+        if !has_escape {
+            rewrite val = this.src[content_start..content_end]
+        } else {
+            set sub = this.src[content_start..content_end]
+            set i: int64 = 0
+            while i < sub.len() {
+                if sub[i..i + 1] == "\\" && i + 1 < sub.len() {
+                    set esc = sub[i + 1..i + 2]
+                    set esc_char: string = switch esc {
+                        "n" -> "\n"
+                        "t" -> "\t"
+                        "\"" -> "\""
+                        "\\" -> "\\"
+                        else -> esc
+                    }
+                    rewrite val = val + esc_char
+                    rewrite i = i + 2
+                } else {
+                    rewrite val = val + sub[i..i + 1]
+                    rewrite i = i + 1
+                }
+            }
+        }
+        if is_tr {
+            return init_token("TR_STRING", val, start_line, start_col)
+        }
+        return init_token("STRING", val, start_line, start_col)
+    }
+
+    fun read_color() -> Token {
+        set start_line: int64 = this.line
+        set start_col: int64 = this.col
+        set _: string = this.next_char()
+        set val: string = "#"
+        while this.pos < this.len && this.is_hex_digit(this.peek_char()) {
+            rewrite val = val + this.next_char()
+        }
+        return init_token("COLOR", val, start_line, start_col)
+    }
+
+    fun read_number() -> Token {
+        set start_line: int64 = this.line
+        set start_col: int64 = this.col
+        set start_pos: int64 = this.pos
+        while this.pos < this.len && this.is_digit(this.peek_char()) {
+            set _: string = this.next_char()
+        }
+        if this.peek_char() == "." && this.is_digit(this.peek_next_char()) {
+            set _: string = this.next_char()
+            while this.pos < this.len && this.is_digit(this.peek_char()) {
+                set _: string = this.next_char()
+            }
+        }
+        set val: string = this.src[start_pos..this.pos]
+        if this.peek_char() == "%" {
+            set _: string = this.next_char()
+            return init_token("PERCENT", val + "%", start_line, start_col)
+        }
+        if this.peek_char() == "m" && this.peek_next_char() == "s" {
+            set _: string = this.next_char()
+            set __: string = this.next_char()
+            return init_token("DURATION", val + "ms", start_line, start_col)
+        }
+        if this.peek_char() == "s" && !this.is_letter(this.peek_next_char()) {
+            set _: string = this.next_char()
+            return init_token("DURATION", val + "s", start_line, start_col)
+        }
+        return init_token("NUMBER", val, start_line, start_col)
+    }
+
+    fun is_ident_part(ch: string) -> bool {
+        return this.is_letter(ch) || this.is_digit(ch) || ch == "-"
+    }
+
+    fun read_ident() -> Token {
+        set start_line: int64 = this.line
+        set start_col: int64 = this.col
+        set start_pos: int64 = this.pos
+        while this.pos < this.len && this.is_ident_part(this.peek_char()) {
+            set _: string = this.next_char()
+        }
+        set val: string = this.src[start_pos..this.pos]
+        return init_token(this.resolve_keyword(val), val, start_line, start_col)
+    }
+
+    fun resolve_keyword(name: string) -> string {
+        if name == "extern" || name == "use" || name == "theme" || name == "adaptive" {
+            return name
+        }
+        if name == "component" || name == "dialog" || name == "screen" || name == "state" {
+            return name
+        }
+        if name == "anim" || name == "tr" || name == "if" || name == "else" || name == "switch" || name == "shortcuts" {
+            return name
+        }
+        if name == "true" || name == "false" || name == "default" {
+            return name
+        }
+        return "IDENT"
+    }
+
+    public fun next_token() -> Token {
+        this.skip_whitespace_and_comments()
+        if this.pos >= this.len {
+            return init_token("EOF", "", this.line, this.col)
+        }
+        set cur_line: int64 = this.line
+        set cur_col: int64 = this.col
+        set ch: string = this.peek_char()
+
+        if ch == "t" && this.peek_next_char() == "r" && this.pos + 2 < this.len && this.src[this.pos + 2..this.pos + 3] == "\"" {
+            set _: string = this.next_char()
+            set __: string = this.next_char()
+            return this.read_string(true)
+        }
+        if ch == "\"" {
+            return this.read_string(false)
+        }
+        if ch == "#" {
+            return this.read_color()
+        }
+        if this.is_digit(ch) {
+            return this.read_number()
+        }
+        if this.is_letter(ch) {
+            return this.read_ident()
+        }
+        if ch == "-" {
+            if this.peek_next_char() == ">" {
+                set _: string = this.next_char()
+                set __: string = this.next_char()
+                return init_token("->", "->", cur_line, cur_col)
+            }
+        }
+        if ch == "=" {
+            if this.peek_next_char() == ">" {
+                set _: string = this.next_char()
+                set __: string = this.next_char()
+                return init_token("=>", "=>", cur_line, cur_col)
+            }
+        }
+        return this.read_punctuation(cur_line, cur_col)
+    }
+
+    fun read_punctuation(cur_line: int64, cur_col: int64) -> Token {
+        set ch: string = this.next_char()
+        return init_token(ch, ch, cur_line, cur_col)
+    }
+}

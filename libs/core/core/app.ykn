@@ -1,0 +1,531 @@
+#![lint::allow("unused_import")]
+
+load core.mem: persistent
+load core.utils: cast
+load std.io: print, flush, terminal_size
+load std.itermtool.terminal: enable_raw_mode, disable_raw_mode, enter_alternate_screen, leave_alternate_screen, clear_all, has_resized
+load std.itermtool.event: try_read_event, poll_event, Event, EVENT_KEY, EVENT_MOUSE
+load std.itermtool.key: KeyEvent, KEY_TAB, KEY_ESC
+load std.itermtool.mouse: MouseEvent, enable_mouse, disable_mouse
+load .cell: Cell, init_cell
+load .buffer: TerminalBuffer
+load .diff: DoubleBuffer, compute_diff_spans, flush_diff_spans
+load .layout.rect: Rect, init_rect
+load .layout.scale: scale_size, scale_padding, scale_gap, compute_scale_factor, resolve_active_breakpoint
+load .input.focus: FocusManager
+load .input.mouse: MouseRouter
+load .input.modal: ModalManager, ModalEntry
+load .animation.ticker: AnimationTicker
+load .logger: log_debug
+
+public class LayoutContext {
+    public width: int32
+    public height: int32
+    public scale: float64
+    public breakpoint: string
+
+    public fun init(width: int32 = 80, height: int32 = 24, scale: float64 = 1.0, breakpoint: string = "desktop") {
+        rewrite this.width = width
+        rewrite this.height = height
+        rewrite this.scale = scale
+        rewrite this.breakpoint = breakpoint
+    }
+}
+
+fun default_screen_draw(ref buf: TerminalBuffer) {
+    space
+}
+
+fun default_screen_key(k: KeyEvent) -> bool {
+    return false
+}
+
+fun default_screen_mouse(m: MouseEvent) -> bool {
+    return false
+}
+
+fun default_screen_resize(w: int32, h: int32) {
+    space
+}
+
+fun default_app_resize(w: int32, h: int32) {
+    space
+}
+
+fun default_dialog_draw(ref buf: TerminalBuffer) {
+    space
+}
+
+fun default_dialog_key(k: KeyEvent) -> bool {
+    return false
+}
+
+fun default_dialog_mouse(m: MouseEvent) -> bool {
+    return false
+}
+
+fun copy_key(ref k: KeyEvent) -> KeyEvent {
+    return init KeyEvent(k.code, k.char_val, k.ctrl, k.alt, k.shift)
+}
+
+fun copy_mouse(ref m: MouseEvent) -> MouseEvent {
+    return init MouseEvent(m.kind, m.button, m.x, m.y, m.ctrl, m.alt, m.shift)
+}
+
+public class Screen {
+    public title: string
+    // note: using explicit func ptr field to workaround static method dispatch on base classes
+    public draw_fn: fun(ref TerminalBuffer)
+    public handle_key_fn: fun(KeyEvent) -> bool
+    public handle_mouse_fn: fun(MouseEvent) -> bool
+    public on_resize_fn: fun(int32, int32)
+
+    public fun init(title: string = "Screen") {
+        rewrite this.title = title
+        rewrite this.draw_fn = default_screen_draw
+        rewrite this.handle_key_fn = default_screen_key
+        rewrite this.handle_mouse_fn = default_screen_mouse
+        rewrite this.on_resize_fn = default_screen_resize
+    }
+
+    public fun build_layout(ref ctx: LayoutContext) {}
+
+    public fun draw(ref buf: TerminalBuffer) {
+        set f = this.draw_fn
+        f(ref buf)
+    }
+
+    public fun handle_key(key: KeyEvent) -> bool {
+        set f = this.handle_key_fn
+        return f(key)
+    }
+
+    public fun handle_mouse(m: MouseEvent) -> bool {
+        set f = this.handle_mouse_fn
+        return f(m)
+    }
+
+    public fun on_resize(w: int32, h: int32) {
+        set f = this.on_resize_fn
+        f(w, h)
+    }
+}
+
+public class Dialog {
+    public title: string
+    public message: string
+    public size_w: int32
+    public size_h: int32
+    public is_modal: bool
+    public dim_backdrop: bool
+    // note: expl funcs ptr...
+    public draw_fn: fun(ref TerminalBuffer)
+    public handle_key_fn: fun(KeyEvent) -> bool
+    public handle_mouse_fn: fun(MouseEvent) -> bool
+    public on_resize_fn: fun(int32, int32)
+
+    public fun init(title: string = "Dialog", message: string = "", size_w: int32 = 40, size_h: int32 = 10, is_modal: bool = true, dim_backdrop: bool = true) {
+        rewrite this.title = title
+        rewrite this.message = message
+        rewrite this.size_w = size_w
+        rewrite this.size_h = size_h
+        rewrite this.is_modal = is_modal
+        rewrite this.dim_backdrop = dim_backdrop
+        rewrite this.draw_fn = default_dialog_draw
+        rewrite this.handle_key_fn = default_dialog_key
+        rewrite this.handle_mouse_fn = default_dialog_mouse
+        rewrite this.on_resize_fn = default_screen_resize
+    }
+
+    public fun build_layout(ref ctx: LayoutContext) {}
+
+    public fun draw(ref buf: TerminalBuffer) {
+        set f = this.draw_fn
+        f(ref buf)
+    }
+
+    public fun handle_key(key: KeyEvent) -> bool {
+        set f = this.handle_key_fn
+        return f(key)
+    }
+
+    public fun handle_mouse(m: MouseEvent) -> bool {
+        set f = this.handle_mouse_fn
+        return f(m)
+    }
+
+    public fun on_resize(w: int32, h: int32) {
+        set f = this.on_resize_fn
+        f(w, h)
+    }
+}
+
+fun draw_dialog_box(ref buf: TerminalBuffer, x: int32, y: int32, w: int32, h: int32, title: string) {
+    for r in 0..h {
+        set ry = y + cast(r, "int32")
+        for c in 0..w {
+            set cx = x + cast(c, "int32")
+            buf.draw_text(cx, ry, " ", "default", "black", false, false, false, false, false)
+        }
+    }
+    buf.draw_text(x, y, "╭", "white", "black", true, false, false, false, false)
+    buf.draw_text(x + w - 1, y, "╮", "white", "black", true, false, false, false, false)
+    buf.draw_text(x, y + h - 1, "╰", "white", "black", true, false, false, false, false)
+    buf.draw_text(x + w - 1, y + h - 1, "╯", "white", "black", true, false, false, false, false)
+    for c in 1..(w - 1) {
+        set cx = x + cast(c, "int32")
+        buf.draw_text(cx, y, "─", "white", "black", false, false, false, false, false)
+        buf.draw_text(cx, y + h - 1, "─", "white", "black", false, false, false, false, false)
+    }
+    for r in 1..(h - 1) {
+        set ry = y + cast(r, "int32")
+        buf.draw_text(x, ry, "│", "white", "black", false, false, false, false, false)
+        buf.draw_text(x + w - 1, ry, "│", "white", "black", false, false, false, false, false)
+    }
+    if title.len() > 0 && w > cast(title.len(), "int32") + 4 {
+        set title_hdr = " " + title + " "
+        buf.draw_text(x + 2, y, title_hdr, "yellow", "black", true, false, false, false, false)
+    }
+}
+
+public class SiestaApp {
+    public width: int32
+    public height: int32
+    public scale: float64
+    public auto_scale: bool
+    public base_width: int32
+    public base_height: int32
+    public locale: string
+    public is_running: bool
+    public is_raw: bool
+    public mounted_screen: Screen?
+    public overlays: Screen[]
+    public active_dialog: Dialog?
+    public double_buf: DoubleBuffer
+    public focus_mgr: FocusManager
+    public mouse_router: MouseRouter
+    public modal_mgr: ModalManager
+    public anim_ticker: AnimationTicker
+    public on_resize_fn: fun(int32, int32)
+
+    public fun init(width: int32 = 80, height: int32 = 24) {
+        rewrite this.width = width
+        rewrite this.height = height
+        rewrite this.scale = 1.0
+        rewrite this.auto_scale = true
+        rewrite this.base_width = 80
+        rewrite this.base_height = 24
+        rewrite this.locale = "en"
+        rewrite this.is_running = true
+        rewrite this.is_raw = false
+        rewrite this.mounted_screen = null
+        set empty_overlays: Screen[] = []
+        rewrite this.overlays = persistent(empty_overlays)
+        rewrite this.active_dialog = null
+        rewrite this.double_buf = init DoubleBuffer(width, height)
+        rewrite this.focus_mgr = init FocusManager()
+        rewrite this.mouse_router = init MouseRouter()
+        rewrite this.modal_mgr = init ModalManager()
+        rewrite this.anim_ticker = init AnimationTicker()
+        rewrite this.on_resize_fn = default_app_resize
+    }
+
+    public fun set_scale(scale: float64) {
+        rewrite this.scale = scale
+    }
+
+    public fun set_auto_scale(enabled: bool, base_w: int32 = 80, base_h: int32 = 24) {
+        rewrite this.auto_scale = enabled
+        rewrite this.base_width = base_w
+        rewrite this.base_height = base_h
+        if enabled {
+            rewrite this.scale = compute_scale_factor(this.width, this.height, base_w, base_h)
+        }
+    }
+
+    public fun on_resize(handler: fun(int32, int32)) {
+        rewrite this.on_resize_fn = handler
+    }
+
+    public fun breakpoint() -> string {
+        return resolve_active_breakpoint(this.width)
+    }
+
+    public fun resize(new_w: int32, new_h: int32) {
+        if new_w <= 0 || new_h <= 0 {
+            return
+        }
+        log_debug("[SiestaApp.resize] resizing from (" + cast(this.width, "string") + "x" + cast(this.height, "string") + ") to (" + cast(new_w, "string") + "x" + cast(new_h, "string") + ")")
+        rewrite this.width = new_w
+        rewrite this.height = new_h
+        if this.auto_scale {
+            rewrite this.scale = compute_scale_factor(new_w, new_h, this.base_width, this.base_height)
+        }
+        this.double_buf.resize(new_w, new_h)
+        this.double_buf.force_redraw_all()
+        if this.is_raw {
+            print("\x1b[2J\x1b[H")
+            flush()
+        }
+        set f = this.on_resize_fn
+        f(new_w, new_h)
+        if this.mounted_screen != null {
+            set s = this.mounted_screen ?? init Screen()
+            s.on_resize(new_w, new_h)
+        }
+        for i in 0..this.overlays.len() {
+            this.overlays[i].on_resize(new_w, new_h)
+        }
+        if this.active_dialog != null {
+            set d = this.active_dialog ?? init Dialog()
+            d.on_resize(new_w, new_h)
+        }
+        set _ = this.render_frame()
+    }
+
+    public fun check_resize() -> bool {
+        if has_resized(this.width, this.height) {
+            set sz = terminal_size()
+            if sz.0 > 0 && sz.1 > 0 && (sz.0 != this.width || sz.1 != this.height) {
+                this.resize(sz.0, sz.1)
+                return true
+            }
+        }
+        return false
+    }
+
+    public fun set_locale(locale: string) {
+        rewrite this.locale = locale
+    }
+
+    public fun mount_screen(screen: Screen) {
+        log_debug("[SiestaApp.mount_screen] mounting screen: " + screen.title)
+        rewrite this.mounted_screen = screen
+    }
+
+    public fun add_overlay(overlay: Screen) {
+        this.overlays.push(overlay)
+        rewrite this.overlays = persistent(this.overlays)
+    }
+
+    public fun remove_overlay(title: string) -> bool {
+        set found: int32 = -1
+        for i in 0..this.overlays.len() {
+            if this.overlays[i].title == title {
+                rewrite found = cast(i, "int32")
+            }
+        }
+        if found < 0 {
+            return false
+        }
+        set new_ov: Screen[] = []
+        for i in 0..this.overlays.len() {
+            if cast(i, "int32") != found {
+                new_ov.push(this.overlays[i])
+            }
+        }
+        rewrite this.overlays = persistent(new_ov)
+        return true
+    }
+
+    public fun clear_overlays() {
+        set empty_ov: Screen[] = []
+        rewrite this.overlays = persistent(empty_ov)
+    }
+
+    public fun show_dialog(dialog: Dialog) {
+        rewrite this.active_dialog = dialog
+    }
+
+    public fun close_dialog() {
+        rewrite this.active_dialog = null
+    }
+
+    public fun exit() {
+        rewrite this.is_running = false
+    }
+
+    public fun init_terminal() -> bool {
+        log_debug("[SiestaApp.init_terminal] initializing terminal raw mode")
+        if !this.is_raw {
+            enable_raw_mode()
+            enter_alternate_screen()
+            enable_mouse()
+            print("\x1b[?25l")
+            flush()
+            rewrite this.is_raw = true
+            set sz = terminal_size()
+            if sz.0 > 0 && sz.1 > 0 && (sz.0 != this.width || sz.1 != this.height) {
+                this.resize(sz.0, sz.1)
+            }
+            log_debug("[SiestaApp.init_terminal] entered alternate screen, raw mode active")
+        }
+        return true
+    }
+
+    public fun restore_terminal() {
+        log_debug("[SiestaApp.restore_terminal] restoring terminal")
+        if this.is_raw {
+            disable_mouse()
+            print("\x1b[?25h")
+            flush()
+            leave_alternate_screen()
+            disable_raw_mode()
+            rewrite this.is_raw = false
+        }
+    }
+
+    public fun render_frame() -> int32 {
+        log_debug("[SiestaApp.render_frame] rendering frame width=" + cast(this.width, "string") + " height=" + cast(this.height, "string"))
+        this.double_buf.back_buffer.clear()
+        set ctx = init LayoutContext(this.width, this.height, this.scale, this.breakpoint())
+        if this.mounted_screen != null {
+            set s = this.mounted_screen ?? init Screen()
+            log_debug("[SiestaApp.render_frame] calling build_layout and draw for screen: " + s.title)
+            s.build_layout(ref ctx)
+            s.draw(ref this.double_buf.back_buffer)
+        } else {
+            log_debug("[SiestaApp.render_frame] warning: mounted_screen is null")
+        }
+        for i in 0..this.overlays.len() {
+            set ov = this.overlays[i]
+            ov.build_layout(ref ctx)
+            ov.draw(ref this.double_buf.back_buffer)
+        }
+        if this.active_dialog != null {
+            set d = this.active_dialog ?? init Dialog()
+            set dw = d.size_w
+            set dh = d.size_h
+            set dx = (this.width - dw) / 2
+            set dy = (this.height - dh) / 2
+            if d.dim_backdrop {
+                for row in 0..this.height {
+                    set cy = cast(row, "int32")
+                    for col in 0..this.width {
+                        set cx = cast(col, "int32")
+                        if cx < dx || cx >= dx + dw || cy < dy || cy >= dy + dh {
+                            set cell = this.double_buf.back_buffer.get_cell(cx, cy)
+                            rewrite cell.dim = true
+                            this.double_buf.back_buffer.set_cell(cx, cy, cell)
+                        }
+                    }
+                }
+            }
+            draw_dialog_box(ref this.double_buf.back_buffer, dx, dy, dw, dh, d.title)
+            d.build_layout(ref ctx)
+            d.draw(ref this.double_buf.back_buffer)
+        }
+        set flushed = this.double_buf.diff_and_flush()
+        log_debug("[SiestaApp.render_frame] frame rendered, diff spans flushed = " + cast(flushed, "string"))
+        return flushed
+    }
+
+    public fun step() -> bool {
+        set resized = this.check_resize()
+        
+        if resized { return this.is_running }
+
+        set has_event = poll_event(16)
+        if has_event {
+            set ev = try_read_event()
+            if ev != null {
+                set e = ev ?? init Event(0)
+                if e.kind == EVENT_KEY && e.key != null {
+                    set k = e.key ?? init KeyEvent(0, "")
+                    log_debug("[SiestaApp.step] key event: code=" + cast(k.code, "string") + " char=" + k.char_val)
+                    if k.code == KEY_ESC {
+                        if this.active_dialog != null {
+                            this.close_dialog()
+                            set _ = this.render_frame()
+                            return this.is_running
+                        }
+                        if this.overlays.len() > 0 {
+                            this.overlays.pop()
+                            set _ = this.render_frame()
+                            return this.is_running
+                        }
+                        if this.mounted_screen != null {
+                            set s = this.mounted_screen ?? init Screen()
+                            set handled = s.handle_key(k)
+                            if handled {
+                                set _ = this.render_frame()
+                                return this.is_running
+                            }
+                        }
+                        this.exit()
+                        return this.is_running
+                    }
+                    if k.code == KEY_TAB {
+                        if k.shift { set _ = this.focus_mgr.prev()} 
+                        else { set _ = this.focus_mgr.next() }
+                    }
+                    set handled: bool = false
+                    if this.active_dialog != null {
+                        set d = this.active_dialog ?? init Dialog()
+                        rewrite handled = d.handle_key(copy_key(ref k))
+                    }
+                    if !handled && this.overlays.len() > 0 {
+                        set ov_count = cast(this.overlays.len(), "int32")
+                        for i in 0..ov_count {
+                            set idx = ov_count - 1 - cast(i, "int32")
+                            set ov = this.overlays[idx]
+                            if ov.handle_key(copy_key(ref k)) {
+                                rewrite handled = true
+                                break
+                            }
+                        }
+                    }
+                    if !handled {
+                        rewrite handled = this.focus_mgr.dispatch_key(copy_key(ref k))
+                    }
+                    if !handled && this.mounted_screen != null {
+                        set s = this.mounted_screen ?? init Screen()
+                        rewrite handled = s.handle_key(copy_key(ref k))
+                    }
+                } elif e.kind == EVENT_MOUSE && e.mouse != null {
+                    set m = e.mouse ?? init MouseEvent(0, 0, 0, 0)
+                    log_debug("[SiestaApp.step] mouse event: kind=" + cast(m.kind, "string") + " at (" + cast(m.x, "string") + "," + cast(m.y, "string") + ")")
+                    set handled: bool = false
+                    if this.active_dialog != null {
+                        set d = this.active_dialog ?? init Dialog()
+                        rewrite handled = d.handle_mouse(copy_mouse(ref m))
+                    }
+                    if !handled && this.overlays.len() > 0 {
+                        set ov_count = cast(this.overlays.len(), "int32")
+                        for i in 0..ov_count {
+                            set idx = ov_count - 1 - cast(i, "int32")
+                            set ov = this.overlays[idx]
+                            if ov.handle_mouse(copy_mouse(ref m)) {
+                                rewrite handled = true
+                                break
+                            }
+                        }
+                    }
+                    if !handled {
+                        rewrite handled = this.focus_mgr.dispatch_mouse(copy_mouse(ref m))
+                    }
+                    if !handled && this.mounted_screen != null {
+                        set s = this.mounted_screen ?? init Screen()
+                        rewrite handled = s.handle_mouse(copy_mouse(ref m))
+                    }
+                }
+            }
+        }
+        set _ = this.render_frame()
+        return this.is_running
+    }
+
+    public fun run() {
+        log_debug("[SiestaApp.run] entering main loop")
+        this.init_terminal()
+        while region this.is_running {
+            set running = this.step()
+            if !running {
+                log_debug("[SiestaApp.run] is_running became false, exiting loop")
+                break
+            }
+        }
+        this.restore_terminal()
+        log_debug("[SiestaApp.run] terminal restored, run finished")
+    }
+}

@@ -1,0 +1,80 @@
+load core.utils: cast
+load ..buffer: TerminalBuffer
+
+public fun get_glyph_2x(ch: string) -> string[] {
+    if ch == "A" || ch == "a" { return ["█▀█ ", "█ █ "] }
+    if ch == "B" || ch == "b" { return ["█▀▄ ", "█▄▀ "] }
+    if ch == "C" || ch == "c" { return ["█▀▀ ", "█▄▄ "] }
+    if ch == "D" || ch == "d" { return ["█▀▄ ", "█▄▀ "] }
+    if ch == "E" || ch == "e" { return ["█▀▀ ", "█▄▄ "] }
+    if ch == "F" || ch == "f" { return ["█▀▀ ", "█   "] }
+    if ch == "G" || ch == "g" { return ["█▀▀ ", "█ █ "] }
+    if ch == "H" || ch == "h" { return ["█ █ ", "█▀█ "] }
+    if ch == "I" || ch == "i" { return [" █  ", " █  "] }
+    if ch == "L" || ch == "l" { return ["█   ", "█▄▄ "] }
+    if ch == "O" || ch == "o" { return ["█▀█ ", "█▄█ "] }
+    if ch == "S" || ch == "s" { return ["█▀▀ ", "▄▄█ "] }
+    if ch == "T" || ch == "t" { return ["▀█▀ ", " █  "] }
+    if ch == "0" { return ["█▀█ ", "█▄█ "] }
+    if ch == "1" { return [" █  ", " █  "] }
+    if ch == "2" { return ["▀▀█ ", "█▄▄ "] }
+    if ch == "3" { return ["▀▀█ ", "▄▄█ "] }
+    if ch == "4" { return ["█ █ ", "▀▀█ "] }
+    if ch == "5" { return ["█▀▀ ", "▄▄█ "] }
+    if ch == "6" { return ["█▀▀ ", "█▄█ "] }
+    if ch == "7" { return ["▀▀█ ", "  █ "] }
+    if ch == "8" { return ["█▀█ ", "█▄█ "] }
+    if ch == "9" { return ["█▀█ ", "▀▀█ "] }
+    if ch == " " { return ["   ", "   "] }
+    if ch == "!" { return [" █ ", " ▄ "] }
+    if ch == "-" { return ["▀▀▀", "   "] }
+    if ch == "+" { return [" ▄ ", "▀█▀"] }
+    return ["██ ", "██ "]
+}
+
+public fun render_matrix_text_2x(text: string) -> string[] {
+    set line0: string = ""
+    set line1: string = ""
+    for i in 0..text.len() {
+        set ch = text[i..i + 1]
+        set glyph = get_glyph_2x(ch)
+        rewrite line0 = line0 + glyph[0]
+        rewrite line1 = line1 + glyph[1]
+    }
+    set res: string[] = []
+    res.push(line0)
+    res.push(line1)
+    return res
+}
+
+public fun render_matrix_text_3x(text: string) -> string[] {
+    set line0: string = ""
+    set line1: string = ""
+    set line2: string = ""
+    for i in 0..text.len() {
+        set ch = text[i..i + 1]
+        set g2 = get_glyph_2x(ch)
+        rewrite line0 = line0 + g2[0]
+        rewrite line1 = line1 + g2[1]
+        rewrite line2 = line2 + g2[1]
+    }
+    set res: string[] = []
+    res.push(line0)
+    res.push(line1)
+    res.push(line2)
+    return res
+}
+
+public fun draw_matrix_text(ref buf: TerminalBuffer, x: int32, y: int32, text: string, scale: int32 = 2, fg: string = "default", bg: string = "default") {
+    if scale == 3 {
+        set lines = render_matrix_text_3x(text)
+        for i in 0..lines.len() {
+            buf.draw_text(x, y + cast(i, "int32"), lines[i], fg, bg)
+        }
+    } else {
+        set lines = render_matrix_text_2x(text)
+        for i in 0..lines.len() {
+            buf.draw_text(x, y + cast(i, "int32"), lines[i], fg, bg)
+        }
+    }
+}

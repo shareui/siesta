@@ -1,0 +1,180 @@
+#![lint::allow("unused_import")]
+
+load core.utils: assert
+load root.animation.easing: linear, ease_in_quad, ease_out_quad, ease_in_out_quad
+load root.animation.easing: ease_in_cubic, ease_out_cubic, ease_in_out_cubic
+load root.animation.easing: bounce_out, bounce_in, bounce_in_out, elastic_out, sample_easing
+load root.animation.transition: Transition, Pulse, Slide
+load root.animation.ticker: AnimationTicker
+
+#[test]
+fun test_easing_curves_boundaries() {
+    // linear
+    assert(linear(0.0) == 0.0)
+    assert(linear(0.5) == 0.5)
+    assert(linear(1.0) == 1.0)
+    assert(linear(-0.2) == 0.0)
+    assert(linear(1.5) == 1.0)
+
+    // quadratic curves
+    assert(ease_in_quad(0.0) == 0.0)
+    assert(ease_in_quad(1.0) == 1.0)
+    assert(ease_in_quad(0.5) == 0.25)
+
+    assert(ease_out_quad(0.0) == 0.0)
+    assert(ease_out_quad(1.0) == 1.0)
+    assert(ease_out_quad(0.5) == 0.75)
+
+    assert(ease_in_out_quad(0.0) == 0.0)
+    assert(ease_in_out_quad(0.5) == 0.5)
+    assert(ease_in_out_quad(1.0) == 1.0)
+
+    // cubic curves
+    assert(ease_in_cubic(0.0) == 0.0)
+    assert(ease_in_cubic(1.0) == 1.0)
+    assert(ease_out_cubic(0.0) == 0.0)
+    assert(ease_out_cubic(1.0) == 1.0)
+    assert(ease_in_out_cubic(0.0) == 0.0)
+    assert(ease_in_out_cubic(0.5) == 0.5)
+    assert(ease_in_out_cubic(1.0) == 1.0)
+
+    // bounce curves
+    assert(bounce_out(0.0) == 0.0)
+    assert(bounce_out(1.0) == 1.0)
+    assert(bounce_in(0.0) == 0.0)
+    assert(bounce_in(1.0) == 1.0)
+    assert(bounce_in_out(0.0) == 0.0)
+    assert(bounce_in_out(1.0) == 1.0)
+
+    // elastic curves
+    assert(elastic_out(0.0) == 0.0)
+    assert(elastic_out(1.0) == 1.0)
+}
+
+#[test]
+fun test_sample_easing_dispatch() {
+    assert(sample_easing("linear", 0.5) == 0.5)
+    assert(sample_easing("ease_in", 0.5) == 0.25)
+    assert(sample_easing("ease_out", 0.5) == 0.75)
+    assert(sample_easing("ease_in_out", 0.5) == 0.5)
+    assert(sample_easing("bounce", 0.0) == 0.0)
+    assert(sample_easing("bounce", 1.0) == 1.0)
+    assert(sample_easing("elastic", 0.0) == 0.0)
+    assert(sample_easing("elastic", 1.0) == 1.0)
+    assert(sample_easing("unknown_curve", 0.4) == 0.4)
+}
+
+#[test]
+fun test_scalar_transition_lifecycle() {
+    set trans = init Transition(0.0, 100.0, 1000, 500, "linear")
+
+    // before start
+    assert(trans.sample(400) == 0.0)
+    assert(trans.progress(400) == 0.0)
+    assert(!trans.is_finished(400))
+
+    // at start
+    assert(trans.sample(500) == 0.0)
+    assert(trans.progress(500) == 0.0)
+
+    // halfway
+    assert(trans.sample(1000) == 50.0)
+    assert(trans.progress(1000) == 0.5)
+    assert(!trans.is_finished(1000))
+
+    // at finish
+    assert(trans.sample(1500) == 100.0)
+    assert(trans.progress(1500) == 1.0)
+    assert(trans.is_finished(1500))
+
+    // after finish
+    assert(trans.sample(2500) == 100.0)
+    assert(trans.is_finished(2500))
+
+    // manual stop
+    trans.stop()
+    assert(trans.is_finished(600))
+    assert(trans.sample(600) == 100.0)
+}
+
+#[test]
+fun test_pulse_oscillation() {
+    set pulse = init Pulse(10.0, 20.0, 1000, 0)
+
+    // at start
+    assert(pulse.sample(0) == 10.0)
+
+    // quarter point (climbing)
+    assert(pulse.sample(250) == 15.0)
+
+    // peak point
+    assert(pulse.sample(500) == 20.0)
+
+    // three-quarter point (falling)
+    assert(pulse.sample(750) == 15.0)
+
+    // full period wraps
+    assert(pulse.sample(1000) == 10.0)
+    assert(pulse.sample(1250) == 15.0)
+}
+
+#[test]
+fun test_slide_coordinates() {
+    set slide = init Slide(10, 20, 50, 100, 1000, 0, "linear")
+
+    // start
+    assert(slide.sample_x(0) == 10)
+    assert(slide.sample_y(0) == 20)
+    assert(!slide.is_finished(0))
+
+    // halfway
+    assert(slide.sample_x(500) == 30)
+    assert(slide.sample_y(500) == 60)
+    assert(!slide.is_finished(500))
+
+    // finish
+    assert(slide.sample_x(1000) == 50)
+    assert(slide.sample_y(1000) == 100)
+    assert(slide.is_finished(1000))
+
+    // beyond finish
+    assert(slide.sample_x(1500) == 50)
+    assert(slide.sample_y(1500) == 100)
+    assert(slide.is_finished(1500))
+}
+
+#[test]
+fun test_animation_ticker_idle_and_render_schedule() {
+    set ticker = init AnimationTicker(60)
+
+    // starts idle
+    assert(ticker.is_idle())
+    assert(!ticker.should_render(100))
+    assert(ticker.get_sleep_time_ms(100) == -1)
+
+    // notify active transition
+    ticker.notify_active()
+    assert(!ticker.is_idle())
+
+    // first tick renders immediately
+    set first_render = ticker.should_render(100)
+    assert(first_render)
+
+    // immediate query before 16ms has elapsed returns false
+    set too_early = ticker.should_render(105)
+    assert(!too_early)
+
+    // remaining sleep time is 11ms (16 - 5)
+    set sleep_time = ticker.get_sleep_time_ms(105)
+    assert(sleep_time == 11)
+
+    // after 16ms has elapsed: ready to render
+    set ready_render = ticker.should_render(116)
+    assert(ready_render)
+
+    // transition finishes: notify inactive returns ticker to 0% cpu idle
+    ticker.notify_inactive()
+    assert(ticker.is_idle())
+    assert(!ticker.should_render(130))
+    assert(ticker.get_sleep_time_ms(130) == -1)
+}

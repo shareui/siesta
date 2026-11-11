@@ -1,0 +1,159 @@
+#![lint::allow("unused_import")]
+
+load core.utils: cast
+load std.itermtool.key: KEY_SPACE, KEY_ENTER, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT
+load ..buffer: TerminalBuffer
+
+public class CheckboxWidget {
+    public id: string
+    public label: string
+    public checked: bool
+    public disabled: bool
+    public focused: bool
+
+    public fun init(id: string, label: string, checked: bool = false, disabled: bool = false) {
+        rewrite this.id = id
+        rewrite this.label = label
+        rewrite this.checked = checked
+        rewrite this.disabled = disabled
+        rewrite this.focused = false
+    }
+
+    public fun toggle() -> bool {
+        if this.disabled {
+            return false
+        }
+        rewrite this.checked = !this.checked
+        return true
+    }
+
+    public fun handle_key(code: int32) -> bool {
+        if this.disabled {
+            return false
+        }
+        if code == KEY_SPACE || code == 32 || code == KEY_ENTER || code == 10 || code == 13 {
+            return this.toggle()
+        }
+        return false
+    }
+
+    public fun display_text() -> string {
+        set mark = "[ ] "
+        if this.checked {
+            rewrite mark = "[X] "
+        }
+        if this.focused {
+            return "> " + mark + this.label
+        }
+        return "  " + mark + this.label
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32) {
+        set text = this.display_text()
+        set dim = this.disabled
+        set bold = this.focused
+        set fg = "default"
+        if this.checked {
+            rewrite fg = "green"
+        }
+        buf.draw_text(x, y, text, fg, "default", bold, dim, false, false, false)
+    }
+}
+
+public class RadioGroupWidget {
+    public id: string
+    public items: string[]
+    public selected_index: int32
+    public focused_index: int32
+    public disabled: bool
+
+    public fun init(id: string, selected_index: int32 = 0, disabled: bool = false) {
+        set empty_items: string[] = []
+        rewrite this.id = id
+        rewrite this.items = empty_items
+        rewrite this.selected_index = selected_index
+        rewrite this.focused_index = selected_index
+        rewrite this.disabled = disabled
+    }
+
+    public fun add_item(item: string) -> RadioGroupWidget {
+        this.items.push(item)
+        return this
+    }
+
+    public fun count() -> int32 {
+        return cast(this.items.len(), "int32")
+    }
+
+    public fun select(idx: int32) -> bool {
+        if this.disabled || idx < 0 || idx >= this.count() {
+            return false
+        }
+        rewrite this.selected_index = idx
+        rewrite this.focused_index = idx
+        return true
+    }
+
+    public fun next() -> int32 {
+        if this.count() == 0 {
+            return -1
+        }
+        set next_idx = (this.selected_index + 1) % this.count()
+        this.select(next_idx)
+        return this.selected_index
+    }
+
+    public fun prev() -> int32 {
+        if this.count() == 0 {
+            return -1
+        }
+        set prev_idx = this.selected_index - 1
+        if prev_idx < 0 {
+            rewrite prev_idx = this.count() - 1
+        }
+        this.select(prev_idx)
+        return this.selected_index
+    }
+
+    public fun handle_key(code: int32) -> bool {
+        if this.disabled || this.count() == 0 {
+            return false
+        }
+        if code == KEY_DOWN || code == KEY_RIGHT {
+            this.next()
+            return true
+        }
+        if code == KEY_UP || code == KEY_LEFT {
+            this.prev()
+            return true
+        }
+        return false
+    }
+
+    public fun render(ref buf: TerminalBuffer, x: int32, y: int32, vertical: bool = true) {
+        for i in 0..this.items.len() {
+            set idx = cast(i, "int32")
+            set mark = "( ) "
+            set fg = "default"
+            if idx == this.selected_index {
+                rewrite mark = "(*) "
+                rewrite fg = "cyan"
+            }
+            set item_text = mark + this.items[i]
+            if idx == this.focused_index {
+                rewrite item_text = "> " + item_text
+            } else {
+                rewrite item_text = "  " + item_text
+            }
+
+            set cur_x = x
+            set cur_y = y
+            if vertical {
+                rewrite cur_y = y + idx
+            } else {
+                rewrite cur_x = x + idx * 16
+            }
+            buf.draw_text(cur_x, cur_y, item_text, fg, "default", idx == this.selected_index, this.disabled, false, false, false)
+        }
+    }
+}
